@@ -20,7 +20,7 @@ def _extract_winner(info: dict) -> int | None:
 
 
 def main() -> None:
-    env = SingleAgentWrapper(env_id="ChefsHat-v0", learning_seat=0, seed=SEED)
+    env = SingleAgentWrapper(env_id="chefshat-v1", learning_seat=0, seed=SEED)
     model = MaskablePPO.load(str(MODEL_PATH), env=env)
 
     episode_rewards = []

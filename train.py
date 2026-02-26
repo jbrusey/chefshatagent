@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+import ChefsHatGym.env
 
-import gymnasium as gym
+import gym
 from sb3_contrib import MaskablePPO
 
 from single_agent_wrapper import SingleAgentWrapper
@@ -13,7 +14,7 @@ MODEL_PATH = Path("models/ppo_chefhats_masked")
 
 
 def main() -> None:
-    env = SingleAgentWrapper(env_id="ChefsHat-v0", learning_seat=0, seed=SEED)
+    env = SingleAgentWrapper(env_id="chefshat-v1", learning_seat=0, seed=SEED)
 
     # Dict observations require a multi-input policy; flat observations use MLP.
     is_dict_obs = isinstance(env.observation_space, gym.spaces.Dict)

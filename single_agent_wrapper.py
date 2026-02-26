@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterable
 
-import gymnasium as gym
+import gym
 import numpy as np
 
 
@@ -27,7 +27,7 @@ class SingleAgentWrapper(gym.Env):
 
     metadata = {"render_modes": []}
 
-    def __init__(self, env_id: str = "ChefsHat-v0", learning_seat: int = 0, seed: int = 42):
+    def __init__(self, env_id: str = "chefshat-v1", learning_seat: int = 0, seed: int = 42):
         super().__init__()
         self.learning_seat = learning_seat
         self._seed = seed

@@ -6,9 +6,10 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
   "chefshatgym",
+  "torch==2.2.2",
   "stable-baselines3",
   "sb3-contrib",
-  "gymnasium",
+  "gym==0.26.2",
   "numpy",
 ]
 
