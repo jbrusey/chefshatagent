@@ -10,18 +10,35 @@ from single_agent_wrapper import SingleAgentWrapper
 SEED = 42
 N_EPISODES = 100
 MODEL_PATH = Path("models/ppo_chefhats_masked")
+LEARNING_SEAT = 0
 
 
-def _extract_winner(info: dict) -> int | None:
-    for key in ("winner", "winning_player", "winningPlayer"):
-        if key in info:
-            return int(info[key])
-    return None
+def _resolve_model_path(model_path: Path) -> Path:
+    """Return the final model if it exists, otherwise the latest checkpoint."""
+    if Path(str(model_path) + ".zip").exists():
+        return model_path
+    checkpoints = sorted(model_path.parent.glob(f"{model_path.name}_*_steps.zip"))
+    if checkpoints:
+        latest = checkpoints[-1]
+        print(f"Final model not found — loading latest checkpoint: {latest.name}")
+        return latest.with_suffix("")
+    raise FileNotFoundError(
+        f"No model found at {model_path}.zip and no checkpoints in {model_path.parent}. "
+        "Run train.py first."
+    )
+
+
+def _is_win(info: dict, learning_seat: int) -> bool:
+    """Return True if the learning agent finished 1st (Match_Score == 3)."""
+    scores = info.get("Match_Score", [])
+    return bool(scores) and int(scores[learning_seat]) == 3
 
 
 def main() -> None:
-    env = SingleAgentWrapper(env_id="chefshat-v1", learning_seat=0, seed=SEED)
-    model = MaskablePPO.load(str(MODEL_PATH), env=env)
+    env = SingleAgentWrapper(env_id="chefshat-v1", learning_seat=LEARNING_SEAT, seed=SEED)
+    resolved = _resolve_model_path(MODEL_PATH)
+    model = MaskablePPO.load(str(resolved), env=env)
+    print(f"Loaded model: {resolved}")
 
     episode_rewards = []
     wins = 0
@@ -39,22 +56,18 @@ def main() -> None:
             total_reward += reward
             final_info = info
 
-        winner = _extract_winner(final_info)
-        if winner is not None:
-            wins += int(winner == 0)
-        else:
-            # Fallback heuristic: terminal positive reward counts as a win.
-            wins += int(total_reward > 0)
+        if _is_win(final_info, LEARNING_SEAT):
+            wins += 1
 
         episode_rewards.append(total_reward)
 
-    avg_reward = float(np.mean(episode_rewards)) if episode_rewards else 0.0
     win_rate = 100.0 * wins / N_EPISODES
+    avg_reward = float(np.mean(episode_rewards))
 
-    print(f"Episodes: {N_EPISODES}")
-    print(f"Wins (seat 0): {wins}")
-    print(f"Win rate: {win_rate:.2f}%")
-    print(f"Average reward: {avg_reward:.4f}")
+    print(f"\nEpisodes:   {N_EPISODES}")
+    print(f"Wins:       {wins}")
+    print(f"Win rate:   {win_rate:.1f}%")
+    print(f"Avg reward: {avg_reward:.4f}")
 
     env.close()
 
