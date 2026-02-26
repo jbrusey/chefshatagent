@@ -39,5 +39,5 @@ Evaluation runs 100 games and prints:
 ## Run tests
 
 ```bash
-uv run python -m unittest discover -s tests -v
+uv run pytest -v
 ```

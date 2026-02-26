@@ -12,6 +12,11 @@ dependencies = [
   "numpy",
 ]
 
+[project.optional-dependencies]
+test = [
+  "pytest",
+]
+
 # Quick start with uv:
 #   uv venv
 #   uv pip install -e .
