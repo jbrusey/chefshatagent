@@ -1,0 +1,31 @@
+[project]
+name = "chefhats-rl"
+version = "0.1.0"
+description = "Train a masked PPO agent for Chef's Hat against random opponents"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "chefshatgym",
+  "torch==2.2.2",
+  "stable-baselines3",
+  "sb3-contrib",
+  "gym==0.26.2",
+  "numpy",
+]
+
+[project.optional-dependencies]
+test = [
+  "pytest",
+]
+
+# Quick start with uv:
+#   uv venv
+#   uv pip install -e .
+#   uv run train.py
+
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["single_agent_wrapper", "train", "evaluate"]
