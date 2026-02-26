@@ -9,6 +9,7 @@ from sb3_contrib import MaskablePPO
 from single_agent_wrapper import SingleAgentWrapper
 
 SEED = 42
+GAMMA = 0.99
 TOTAL_TIMESTEPS = 1_000_000
 MODEL_PATH = Path("models/ppo_chefhats_masked")
 
@@ -27,10 +28,11 @@ def main() -> None:
         batch_size=64,
         verbose=1,
         seed=SEED,
+        gamma=GAMMA,
     )
 
     MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
-    model.learn(total_timesteps=TOTAL_TIMESTEPS, progress_bar=True)
+    model.learn(total_timesteps=TOTAL_TIMESTEPS)
     model.save(str(MODEL_PATH))
 
     env.close()

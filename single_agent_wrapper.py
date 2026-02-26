@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any
 
 import gym
 import numpy as np
 
+GAMMA=0.99
 
 @dataclass
 class TurnStep:
@@ -47,6 +48,11 @@ class SingleAgentWrapper(gym.Env):
         self._last_obs: Any | None = None
         self._last_info: dict[str, Any] = {}
 
+    def _phi(self, obs):
+        hand = obs[11:28]
+        cards_left = np.count_nonzero(hand)
+        return -cards_left
+
     def reset(self, *, seed: int | None = None, options: dict | None = None):
         if seed is not None:
             self._seed = seed
@@ -81,13 +87,28 @@ class SingleAgentWrapper(gym.Env):
         obs, reward_add, terminated, truncated, info = self._advance_until_learning_turn(step.obs, step.info)
         total_reward += reward_add
 
+        # potential shaping
+        phi_prev = self._phi(self._last_obs)
+        phi_next = self._phi(obs)
+
+        shaped_reward = total_reward + GAMMA * phi_next - phi_prev
+
         self._last_obs = obs
         self._last_info = info
-        return obs, float(total_reward), terminated, truncated, info
+
+        return obs, shaped_reward, terminated, truncated, info
+    #        return obs, float(total_reward), terminated, truncated, info
 
     def action_masks(self) -> np.ndarray:
         """Boolean valid-action mask compatible with sb3-contrib MaskablePPO."""
-        return self._compute_action_mask(self._last_info)
+        if self._last_obs is None:
+            raise RuntimeError("No observation available yet. Call reset() before action_masks().")
+        mask = np.asarray(self._last_obs)[28:]
+        if mask.size != self.action_space.n:
+            raise RuntimeError(
+                f"Observation mask slice has size {mask.size}, expected {self.action_space.n}"
+            )
+        return mask.astype(bool)
 
     # Alias requested in the prompt text.
     def get_action_mask(self) -> np.ndarray:
@@ -109,7 +130,8 @@ class SingleAgentWrapper(gym.Env):
         current_info = info
 
         while not (terminated or truncated) and self._current_player(current_info) != self.learning_seat:
-            mask = self._compute_action_mask(current_info)
+            self._last_obs = current_obs
+            mask = self.action_masks()
             valid_actions = np.flatnonzero(mask)
             if valid_actions.size == 0:
                 raise RuntimeError("No valid actions available for non-learning player")
@@ -123,7 +145,9 @@ class SingleAgentWrapper(gym.Env):
         return current_obs, float(total_reward), terminated, truncated, current_info
 
     def _step_base(self, action: int) -> TurnStep:
-        out = self.base_env.step(action)
+        action_vec = np.zeros(self.action_space.n, dtype=np.float32)
+        action_vec[int(action)] = 1.0
+        out = self.base_env.step(action_vec)
 
         # Gymnasium API: obs, reward, terminated, truncated, info
         if isinstance(out, tuple) and len(out) == 5:
@@ -138,50 +162,8 @@ class SingleAgentWrapper(gym.Env):
         raise RuntimeError("Unsupported environment step() return format")
 
     def _is_action_valid(self, action: int) -> bool:
-        mask = self._compute_action_mask(self._last_info)
+        mask = self.action_masks()
         return 0 <= int(action) < mask.size and bool(mask[int(action)])
-
-    def _compute_action_mask(self, info: dict[str, Any] | None = None) -> np.ndarray:
-        info = info or {}
-
-        candidate_masks = [
-            info.get("action_mask"),
-            info.get("action_masks"),
-            getattr(self.base_env, "action_mask", None),
-            getattr(self.base_env, "action_masks", None),
-        ]
-        for mask in candidate_masks:
-            if mask is None:
-                continue
-            mask_arr = np.asarray(mask, dtype=bool).reshape(-1)
-            if mask_arr.size == self.action_space.n:
-                return mask_arr
-
-        valid_list = self._extract_valid_actions(info)
-        mask = np.zeros(self.action_space.n, dtype=bool)
-        mask[valid_list] = True
-        return mask
-
-    def _extract_valid_actions(self, info: dict[str, Any]) -> np.ndarray:
-        candidates: list[Iterable[int] | None] = [
-            info.get("valid_actions"),
-            info.get("legal_actions"),
-            getattr(self.base_env, "valid_actions", None),
-            getattr(self.base_env, "legal_actions", None),
-        ]
-
-        for candidate in candidates:
-            if candidate is None:
-                continue
-            arr = np.asarray(list(candidate), dtype=int).reshape(-1)
-            arr = arr[(arr >= 0) & (arr < self.action_space.n)]
-            if arr.size > 0:
-                return np.unique(arr)
-
-        raise RuntimeError(
-            "Could not determine valid actions. Base env must expose either an action mask "
-            "or a valid/legal action list."
-        )
 
     def _current_player(self, info: dict[str, Any]) -> int:
         candidates = [
