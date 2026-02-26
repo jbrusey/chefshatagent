@@ -16,6 +16,7 @@ dependencies = [
     { name = "gym" },
     { name = "numpy" },
     { name = "sb3-contrib" },
+    { name = "shimmy" },
     { name = "stable-baselines3" },
     { name = "torch" },
 ]
@@ -32,6 +33,7 @@ requires-dist = [
     { name = "numpy" },
     { name = "pytest", marker = "extra == 'test'" },
     { name = "sb3-contrib" },
+    { name = "shimmy", specifier = ">=2.0" },
     { name = "stable-baselines3" },
     { name = "torch", specifier = "==2.2.2" },
 ]
@@ -1002,6 +1004,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/c7/4e/dd31aba603634a7b9473b502fe85b694e4392c448eae0d345640b87211c2/sb3_contrib-2.4.0.tar.gz", hash = "sha256:a3709d97ddd529c45e3d56a5ae7e61a380bb2e11bacb9a3e6951ac0c481350ca", size = 89358, upload-time = "2024-11-18T10:20:53.214Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/50/de/33d3b00116488de9371a56009089ab408d949cda7057e2560c8efae810df/sb3_contrib-2.4.0-py3-none-any.whl", hash = "sha256:725d90157028a94c69804f2e7332128518fb7cbab39e7e141d2d0355547a72ab", size = 92752, upload-time = "2024-11-18T10:20:51.074Z" },
+]
+
+[[package]]
+name = "shimmy"
+version = "2.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "gymnasium" },
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/45/c6/36788ef5e483d761e5080d41378e27db4b388ce219ff2b2e1959edfba071/Shimmy-2.0.0.tar.gz", hash = "sha256:a42d07806fc1ca5460439cb4799f32d4855a9e1138b39a39031e72fb8460a508", size = 31065, upload-time = "2024-05-21T10:35:16.471Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4e/e9/64879ed81025b73865a0b6e5668735bf0b71feff5abb6e7a2bee2a1deae9/Shimmy-2.0.0-py3-none-any.whl", hash = "sha256:4244e693b0ff28bd5ce55e73c636cab953df2a1fafe639718158ee6510613dfe", size = 30601, upload-time = "2024-05-21T10:35:14.872Z" },
 ]
 
 [[package]]

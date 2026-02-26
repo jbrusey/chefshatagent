@@ -18,7 +18,7 @@ def main() -> None:
 
     # Dict observations require a multi-input policy; flat observations use MLP.
     is_dict_obs = isinstance(env.observation_space, gym.spaces.Dict)
-    policy = "MaskableMultiInputPolicy" if is_dict_obs else "MaskableMlpPolicy"
+    policy = "MultiInputPolicy" if is_dict_obs else "MlpPolicy"
 
     model = MaskablePPO(
         policy=policy,

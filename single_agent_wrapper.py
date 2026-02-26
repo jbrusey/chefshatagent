@@ -34,6 +34,13 @@ class SingleAgentWrapper(gym.Env):
         self._rng = np.random.default_rng(seed)
 
         self.base_env = gym.make(env_id)
+
+        # Start experiment once
+        self.base_env.startExperiment(
+            playerNames=["RL", "Random1", "Random2", "Random3"],
+            logDirectory="log",
+            verbose=False
+        )
         self.observation_space = self.base_env.observation_space
         self.action_space = self.base_env.action_space
 
