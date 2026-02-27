@@ -56,7 +56,7 @@ class FrozenPolicyOpponent:
         Path to the serialized MaskablePPO model to load.
     """
 
-    def __init__(self, model_path):
+    def __init__(self, model_path: str) -> None:
         self.model = MaskablePPO.load(model_path)
 
     def act(self, obs, mask):
