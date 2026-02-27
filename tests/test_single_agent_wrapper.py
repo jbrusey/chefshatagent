@@ -246,12 +246,16 @@ def test_frozen_policy_opponent_act_returns_int(monkeypatch):
 # Tests for opponent_pool sampling in reset()
 # ---------------------------------------------------------------------------
 
-def test_reset_raises_when_opponent_pool_empty(monkeypatch):
-    """reset() raises RuntimeError when no opponent_pool is provided."""
+def test_reset_allows_empty_opponent_pool(monkeypatch):
+    """reset() should work without an opponent_pool by using random legal actions."""
     monkeypatch.setattr("single_agent_wrapper.gym.make", lambda _env_id: DummyChefsHatEnv())
     wrapper = SingleAgentWrapper(seed=0)
-    with pytest.raises(RuntimeError, match="opponent_pool"):
-        wrapper.reset()
+
+    obs, info = wrapper.reset()
+
+    assert isinstance(obs, np.ndarray)
+    assert isinstance(info, dict)
+    assert wrapper._opponent_by_seat == {}
 
 
 def test_reset_samples_three_opponents_from_pool(monkeypatch):
