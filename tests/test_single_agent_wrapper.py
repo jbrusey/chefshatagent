@@ -1,9 +1,11 @@
+from unittest.mock import MagicMock
+
 import gym
 import numpy as np
 import pytest
 
 from evaluate import _resolve_model_path
-from single_agent_wrapper import SingleAgentWrapper
+from single_agent_wrapper import FrozenPolicyOpponent, SingleAgentWrapper
 
 
 class DummyChefsHatEnv(gym.Env):
@@ -48,10 +50,19 @@ class DummyChefsHatEnv(gym.Env):
         return self._make_obs(self.turn, legal), reward, terminated, False, info
 
 
+class DummyOpponent:
+    """Fake opponent that always picks the first valid action."""
+
+    def act(self, obs, mask):
+        valid = np.flatnonzero(mask)
+        return int(valid[0])
+
+
 @pytest.fixture
 def env(monkeypatch):
     monkeypatch.setattr("single_agent_wrapper.gym.make", lambda _env_id: DummyChefsHatEnv())
-    return SingleAgentWrapper(seed=123)
+    monkeypatch.setattr("single_agent_wrapper.FrozenPolicyOpponent", lambda path: DummyOpponent())
+    return SingleAgentWrapper(seed=123, opponent_pool=["model_a", "model_b"])
 
 
 def test_reset_advances_to_learning_seat(env):
@@ -70,7 +81,7 @@ def test_step_accumulates_opponent_rewards(env):
 
     phi_prev = -0.0
     phi_next = -0.0
-    expected_reward = 1.0 - 0.3 + env._win_reward(info) + (0.99 * phi_next - phi_prev) + env._step_penalty()
+    expected_reward = 1.0 + env._win_reward(info) + (0.99 * phi_next - phi_prev) + env._step_penalty()
     assert reward == pytest.approx(expected_reward)
     assert terminated is True
     assert truncated is False
@@ -129,7 +140,7 @@ def test_step_applies_shaping_when_terminal_on_agent_step(monkeypatch):
     class TerminalOnAgentStepEnv(gym.Env):
         def __init__(self):
             self.observation_space = gym.spaces.Box(low=0, high=1, shape=(228,), dtype=np.float32)
-            self.action_space = gym.spaces.Discrete(3)
+            self.action_space = gym.spaces.Discrete(200)
             self.current_player = 0
 
         @staticmethod
@@ -149,7 +160,8 @@ def test_step_applies_shaping_when_terminal_on_agent_step(monkeypatch):
             return self._obs(cards_in_hand=1, valid_actions=[0]), 2.0, True, False, info
 
     monkeypatch.setattr("single_agent_wrapper.gym.make", lambda _env_id: TerminalOnAgentStepEnv())
-    wrapper = SingleAgentWrapper(seed=123)
+    monkeypatch.setattr("single_agent_wrapper.FrozenPolicyOpponent", lambda path: DummyOpponent())
+    wrapper = SingleAgentWrapper(seed=123, opponent_pool=["dummy"])
     wrapper.reset(seed=123)
 
     phi_prev = wrapper._phi(wrapper._last_obs)
@@ -166,7 +178,7 @@ def test_step_applies_shaping_when_terminal_during_opponent_advance(monkeypatch)
     class TerminalDuringOpponentAdvanceEnv(gym.Env):
         def __init__(self):
             self.observation_space = gym.spaces.Box(low=0, high=1, shape=(228,), dtype=np.float32)
-            self.action_space = gym.spaces.Discrete(3)
+            self.action_space = gym.spaces.Discrete(200)
             self.current_player = 0
 
         @staticmethod
@@ -190,7 +202,8 @@ def test_step_applies_shaping_when_terminal_during_opponent_advance(monkeypatch)
             return self._obs(cards_in_hand=1, valid_actions=[0]), -0.2, True, False, info
 
     monkeypatch.setattr("single_agent_wrapper.gym.make", lambda _env_id: TerminalDuringOpponentAdvanceEnv())
-    wrapper = SingleAgentWrapper(seed=123)
+    monkeypatch.setattr("single_agent_wrapper.FrozenPolicyOpponent", lambda path: DummyOpponent())
+    wrapper = SingleAgentWrapper(seed=123, opponent_pool=["dummy"])
     wrapper.reset(seed=123)
 
     phi_prev = wrapper._phi(wrapper._last_obs)
@@ -201,6 +214,118 @@ def test_step_applies_shaping_when_terminal_during_opponent_advance(monkeypatch)
     assert reward == pytest.approx(expected)
     assert terminated is True
     assert truncated is False
+
+
+# ---------------------------------------------------------------------------
+# Tests for FrozenPolicyOpponent
+# ---------------------------------------------------------------------------
+
+def test_frozen_policy_opponent_loads_model(monkeypatch):
+    """FrozenPolicyOpponent calls MaskablePPO.load with the given path."""
+    mock_model = MagicMock()
+    monkeypatch.setattr("single_agent_wrapper.MaskablePPO.load", lambda path: mock_model)
+    opp = FrozenPolicyOpponent("my_model_path")
+    assert opp.model is mock_model
+
+
+def test_frozen_policy_opponent_act_returns_int(monkeypatch):
+    """FrozenPolicyOpponent.act() returns an int action from model.predict."""
+    mock_model = MagicMock()
+    mock_model.predict.return_value = (np.array(3), None)
+    monkeypatch.setattr("single_agent_wrapper.MaskablePPO.load", lambda path: mock_model)
+    opp = FrozenPolicyOpponent("path")
+    obs = np.zeros(228, dtype=np.float32)
+    mask = np.ones(200, dtype=bool)
+    action = opp.act(obs, mask)
+    assert action == 3
+    assert isinstance(action, int)
+    mock_model.predict.assert_called_once_with(obs, action_masks=mask, deterministic=True)
+
+
+# ---------------------------------------------------------------------------
+# Tests for opponent_pool sampling in reset()
+# ---------------------------------------------------------------------------
+
+def test_reset_raises_when_opponent_pool_empty(monkeypatch):
+    """reset() raises RuntimeError when no opponent_pool is provided."""
+    monkeypatch.setattr("single_agent_wrapper.gym.make", lambda _env_id: DummyChefsHatEnv())
+    wrapper = SingleAgentWrapper(seed=0)
+    with pytest.raises(RuntimeError, match="opponent_pool"):
+        wrapper.reset()
+
+
+def test_reset_samples_three_opponents_from_pool(monkeypatch):
+    """reset() creates exactly 3 FrozenPolicyOpponent instances from the pool."""
+    monkeypatch.setattr("single_agent_wrapper.gym.make", lambda _env_id: DummyChefsHatEnv())
+    created_paths = []
+
+    def mock_frozen(path):
+        created_paths.append(path)
+        return DummyOpponent()
+
+    monkeypatch.setattr("single_agent_wrapper.FrozenPolicyOpponent", mock_frozen)
+    wrapper = SingleAgentWrapper(seed=0, opponent_pool=["p_a", "p_b", "p_c"])
+    wrapper.reset()
+
+    assert len(created_paths) == 3
+    assert all(p in ["p_a", "p_b", "p_c"] for p in created_paths)
+
+
+def test_reset_maps_opponents_to_non_learning_seats(monkeypatch):
+    """After reset(), each non-learning seat has an assigned opponent."""
+    monkeypatch.setattr("single_agent_wrapper.gym.make", lambda _env_id: DummyChefsHatEnv())
+    monkeypatch.setattr("single_agent_wrapper.FrozenPolicyOpponent", lambda path: DummyOpponent())
+    wrapper = SingleAgentWrapper(seed=0, opponent_pool=["p"])
+    wrapper.reset()
+
+    assert set(wrapper._opponent_by_seat.keys()) == {1, 2, 3}
+    for opp in wrapper._opponent_by_seat.values():
+        assert isinstance(opp, DummyOpponent)
+
+
+# ---------------------------------------------------------------------------
+# Tests for _advance_until_learning_turn() opponent interaction
+# ---------------------------------------------------------------------------
+
+def test_advance_calls_opponent_for_each_non_learning_turn(monkeypatch):
+    """_advance_until_learning_turn uses the opponent for every non-learning seat."""
+    call_log = []
+
+    class LoggingOpponent:
+        def __init__(self, seat):
+            self.seat = seat
+
+        def act(self, obs, mask):
+            call_log.append(self.seat)
+            return int(np.flatnonzero(mask)[0])
+
+    seat_counter = [1]
+
+    def make_logging_opponent(path):
+        opp = LoggingOpponent(seat_counter[0])
+        seat_counter[0] += 1
+        return opp
+
+    monkeypatch.setattr("single_agent_wrapper.gym.make", lambda _env_id: DummyChefsHatEnv())
+    monkeypatch.setattr("single_agent_wrapper.FrozenPolicyOpponent", make_logging_opponent)
+    wrapper = SingleAgentWrapper(seed=0, opponent_pool=["p"])
+    wrapper.reset()
+
+    # DummyChefsHatEnv starts at seat 1; seats 1, 2, 3 each take one turn before seat 0
+    assert len(call_log) == 3
+
+
+def test_advance_raises_when_frozen_opponent_picks_illegal_action(monkeypatch):
+    """_advance_until_learning_turn raises RuntimeError if opponent returns illegal action."""
+    class BadOpponent:
+        def act(self, obs, mask):
+            return 999  # always illegal
+
+    monkeypatch.setattr("single_agent_wrapper.gym.make", lambda _env_id: DummyChefsHatEnv())
+    monkeypatch.setattr("single_agent_wrapper.FrozenPolicyOpponent", lambda path: BadOpponent())
+    wrapper = SingleAgentWrapper(seed=0, opponent_pool=["p"])
+    with pytest.raises(RuntimeError, match="illegal action"):
+        wrapper.reset()
 
 
 # ---------------------------------------------------------------------------
