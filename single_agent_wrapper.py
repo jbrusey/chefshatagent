@@ -42,10 +42,39 @@ class TurnStep:
 
 
 class FrozenPolicyOpponent:
-    def __init__(self, model_path):
+    """Opponent that uses a pre-trained, frozen MaskablePPO policy.
+
+    This class loads a previously trained MaskablePPO model from disk and
+    exposes a simple `act` method that can be used as an opponent policy in
+    the ChefsHat environment. The loaded policy is treated as frozen: this
+    wrapper does not support any further training or updates.
+
+    Parameters
+    ----------
+    model_path : str or os.PathLike
+        Path to the serialized MaskablePPO model to load.
+    """
+
+    def __init__(self, model_path: str) -> None:
         self.model = MaskablePPO.load(model_path)
 
-    def act(self, obs, mask):
+    def act(self, obs: Any, mask: np.ndarray) -> int:
+        """Select an action for the opponent given an observation and mask.
+
+        Parameters
+        ----------
+        obs : Any
+            Observation for the opponent agent, as expected by the model.
+        mask : np.ndarray
+            Action mask indicating which actions are currently valid. This
+            is passed directly to the underlying MaskablePPO policy via
+            the `action_masks` argument.
+
+        Returns
+        -------
+        int
+            The selected action index.
+        """
         action, _ = self.model.predict(
             obs,
             action_masks=mask,
