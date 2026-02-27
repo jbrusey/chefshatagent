@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import numpy as np
@@ -17,7 +18,16 @@ def _resolve_model_path(model_path: Path) -> Path:
     """Return the final model if it exists, otherwise the latest checkpoint."""
     if Path(str(model_path) + ".zip").exists():
         return model_path
-    checkpoints = sorted(model_path.parent.glob(f"{model_path.name}_*_steps.zip"))
+
+    def _step_count(p: Path) -> int:
+        m = re.search(r"_(\d+)_steps", p.stem)
+        return int(m.group(1)) if m else 0
+
+    checkpoints = sorted(
+        (p for p in model_path.parent.glob(f"{model_path.name}_*_steps.zip")
+         if re.search(r"_(\d+)_steps", p.stem)),
+        key=_step_count,
+    )
     if checkpoints:
         latest = checkpoints[-1]
         print(f"Final model not found — loading latest checkpoint: {latest.name}")

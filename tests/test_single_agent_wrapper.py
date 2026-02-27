@@ -2,6 +2,7 @@ import gym
 import numpy as np
 import pytest
 
+from evaluate import _resolve_model_path
 from single_agent_wrapper import SingleAgentWrapper
 
 
@@ -200,3 +201,33 @@ def test_step_applies_shaping_when_terminal_during_opponent_advance(monkeypatch)
     assert reward == pytest.approx(expected)
     assert terminated is True
     assert truncated is False
+
+
+# ---------------------------------------------------------------------------
+# Tests for evaluate._resolve_model_path
+# ---------------------------------------------------------------------------
+
+def test_resolve_model_path_final_model(tmp_path):
+    """Returns the base path when the .zip final model exists."""
+    model_path = tmp_path / "mymodel"
+    (tmp_path / "mymodel.zip").touch()
+    assert _resolve_model_path(model_path) == model_path
+
+
+def test_resolve_model_path_latest_checkpoint_numeric(tmp_path):
+    """Picks the checkpoint with the highest step count (numeric, not lexicographic)."""
+    model_path = tmp_path / "mymodel"
+    # Create checkpoints with step counts that would sort incorrectly alphabetically
+    # (e.g. 20000 > 100000 lexicographically because '2' > '1').
+    for steps in [10000, 20000, 100000, 200000]:
+        (tmp_path / f"mymodel_{steps}_steps.zip").touch()
+
+    resolved = _resolve_model_path(model_path)
+    assert resolved == tmp_path / "mymodel_200000_steps"
+
+
+def test_resolve_model_path_no_model_raises(tmp_path):
+    """Raises FileNotFoundError when no model or checkpoint exists."""
+    model_path = tmp_path / "missing"
+    with pytest.raises(FileNotFoundError):
+        _resolve_model_path(model_path)
