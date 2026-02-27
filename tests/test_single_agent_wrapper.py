@@ -67,8 +67,10 @@ def test_step_accumulates_opponent_rewards(env):
 
     obs, reward, terminated, truncated, info = env.step(1)
 
-    # Learning turn gives +1.0; three opponent turns give -0.3 total.
-    assert reward == pytest.approx(0.7)
+    phi_prev = -0.0
+    phi_next = -0.0
+    expected_reward = 1.0 - 0.3 + env._win_reward(info) + (0.99 * phi_next - phi_prev) + env._step_penalty()
+    assert reward == pytest.approx(expected_reward)
     assert terminated is True
     assert truncated is False
     assert info.get("winner") == 0
@@ -120,3 +122,81 @@ def test_init_without_start_experiment(monkeypatch):
     wrapper = SingleAgentWrapper(seed=123)
 
     assert wrapper.base_env.__class__.__name__ == "MinimalEnv"
+
+
+def test_step_applies_shaping_when_terminal_on_agent_step(monkeypatch):
+    class TerminalOnAgentStepEnv(gym.Env):
+        def __init__(self):
+            self.observation_space = gym.spaces.Box(low=0, high=1, shape=(228,), dtype=np.float32)
+            self.action_space = gym.spaces.Discrete(3)
+            self.current_player = 0
+
+        @staticmethod
+        def _obs(cards_in_hand: int, valid_actions: list[int]) -> np.ndarray:
+            obs = np.zeros(228, dtype=np.float32)
+            obs[11:11 + cards_in_hand] = 1.0
+            obs[28 + np.asarray(valid_actions)] = 1.0
+            return obs
+
+        def reset(self, *, seed=None, options=None):
+            self.current_player = 0
+            return self._obs(cards_in_hand=2, valid_actions=[1]), {"current_player": 0}
+
+        def step(self, action):
+            self.current_player = 1
+            info = {"current_player": 1, "Match_Score": [3, 0, 0, 0]}
+            return self._obs(cards_in_hand=1, valid_actions=[0]), 2.0, True, False, info
+
+    monkeypatch.setattr("single_agent_wrapper.gym.make", lambda _env_id: TerminalOnAgentStepEnv())
+    wrapper = SingleAgentWrapper(seed=123)
+    wrapper.reset(seed=123)
+
+    phi_prev = wrapper._phi(wrapper._last_obs)
+    obs, reward, terminated, truncated, info = wrapper.step(1)
+    phi_next = wrapper._phi(obs)
+
+    expected = 2.0 + wrapper._win_reward(info) + (0.99 * phi_next - phi_prev) + wrapper._step_penalty()
+    assert reward == pytest.approx(expected)
+    assert terminated is True
+    assert truncated is False
+
+
+def test_step_applies_shaping_when_terminal_during_opponent_advance(monkeypatch):
+    class TerminalDuringOpponentAdvanceEnv(gym.Env):
+        def __init__(self):
+            self.observation_space = gym.spaces.Box(low=0, high=1, shape=(228,), dtype=np.float32)
+            self.action_space = gym.spaces.Discrete(3)
+            self.current_player = 0
+
+        @staticmethod
+        def _obs(cards_in_hand: int, valid_actions: list[int]) -> np.ndarray:
+            obs = np.zeros(228, dtype=np.float32)
+            obs[11:11 + cards_in_hand] = 1.0
+            obs[28 + np.asarray(valid_actions)] = 1.0
+            return obs
+
+        def reset(self, *, seed=None, options=None):
+            self.current_player = 0
+            return self._obs(cards_in_hand=3, valid_actions=[1]), {"current_player": 0}
+
+        def step(self, action):
+            if self.current_player == 0:
+                self.current_player = 1
+                return self._obs(cards_in_hand=2, valid_actions=[0]), 0.5, False, False, {"current_player": 1}
+
+            self.current_player = 2
+            info = {"current_player": 2, "Match_Score": [3, 0, 0, 0]}
+            return self._obs(cards_in_hand=1, valid_actions=[0]), -0.2, True, False, info
+
+    monkeypatch.setattr("single_agent_wrapper.gym.make", lambda _env_id: TerminalDuringOpponentAdvanceEnv())
+    wrapper = SingleAgentWrapper(seed=123)
+    wrapper.reset(seed=123)
+
+    phi_prev = wrapper._phi(wrapper._last_obs)
+    obs, reward, terminated, truncated, info = wrapper.step(1)
+    phi_next = wrapper._phi(obs)
+
+    expected = 0.5 - 0.2 + wrapper._win_reward(info) + (0.99 * phi_next - phi_prev) + wrapper._step_penalty()
+    assert reward == pytest.approx(expected)
+    assert terminated is True
+    assert truncated is False

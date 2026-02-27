@@ -13,6 +13,7 @@ from ChefsHatGym.rewards.only_winning import RewardOnlyWinning
 from ChefsHatGym.rewards.reward import Reward
 
 GAMMA=0.99
+APPLY_SHAPING_ON_TERMINAL = True
 
 
 @contextlib.contextmanager
@@ -126,29 +127,29 @@ class SingleAgentWrapper(gym.Env):
         phi_prev = self._phi(self._last_obs)
 
         step = self._step_base(action)
+        obs, info = step.obs, step.info
         total_reward = step.reward
+        terminated, truncated = step.terminated, step.truncated
 
-        if step.terminated or step.truncated:
-            terminal_reward = self._win_reward(step.info)
-            self._last_obs = step.obs
-            self._last_info = step.info
-            return step.obs, total_reward + terminal_reward, step.terminated, step.truncated, step.info
+        if not (terminated or truncated):
+            obs, reward_add, terminated, truncated, info = self._advance_until_learning_turn(obs, info)
+            total_reward += reward_add
 
-        obs, reward_add, terminated, truncated, info = self._advance_until_learning_turn(step.obs, step.info)
-        total_reward += reward_add
-
-        # potential-based reward shaping: F(s,s') = γ·φ(s') − φ(s)
-        phi_next = self._phi(obs)
-        shaped_reward = total_reward + GAMMA * phi_next - phi_prev + self._step_penalty()
-
-        # Add terminal win bonus if the episode ended during opponent turns
         if terminated or truncated:
-            shaped_reward += self._win_reward(info)
+            total_reward += self._win_reward(info)
+
+        # Apply shaping and per-step penalty to terminal and non-terminal transitions.
+        # This keeps reward components consistent for every agent action and lets
+        # terminal transitions benefit from potential-based shaping using the final obs.
+        if APPLY_SHAPING_ON_TERMINAL or not (terminated or truncated):
+            # potential-based reward shaping: F(s,s') = γ·φ(s') − φ(s)
+            phi_next = self._phi(obs)
+            total_reward += GAMMA * phi_next - phi_prev + self._step_penalty()
 
         self._last_obs = obs
         self._last_info = info
 
-        return obs, shaped_reward, terminated, truncated, info
+        return obs, total_reward, terminated, truncated, info
 
     def action_masks(self) -> np.ndarray:
         """Boolean valid-action mask compatible with sb3-contrib MaskablePPO."""
