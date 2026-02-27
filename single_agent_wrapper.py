@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import io
 import logging
+import random
 from dataclasses import dataclass
 from typing import Any
 
@@ -11,6 +12,7 @@ import numpy as np
 import ChefsHatGym.env  # Registers gym.make("chefshat-v1") environment.
 from ChefsHatGym.rewards.only_winning import RewardOnlyWinning
 from ChefsHatGym.rewards.reward import Reward
+from sb3_contrib import MaskablePPO
 
 GAMMA=0.99
 APPLY_SHAPING_ON_TERMINAL = True
@@ -40,6 +42,19 @@ class TurnStep:
     info: dict[str, Any]
 
 
+class FrozenPolicyOpponent:
+    def __init__(self, model_path):
+        self.model = MaskablePPO.load(model_path)
+
+    def act(self, obs, mask):
+        action, _ = self.model.predict(
+            obs,
+            action_masks=mask,
+            deterministic=True
+        )
+        return int(action)
+
+
 class SingleAgentWrapper(gym.Env):
     """
     Collapses a 4-player Chef's Hat game into a single-agent MDP for seat 0.
@@ -52,13 +67,17 @@ class SingleAgentWrapper(gym.Env):
     metadata = {"render_modes": []}
 
     def __init__(self, env_id: str = "chefshat-v1", learning_seat: int = 0, seed: int = 42,
-                 reward_fn: Reward | None = None):
+                 reward_fn: Reward | None = None, opponent_pool: list[str] | None = None):
         super().__init__()
         self.learning_seat = learning_seat
         self._seed = seed
         self._rng = np.random.default_rng(seed)
         # Use RewardOnlyWinning by default; pass any ChefsHatGym Reward subclass to override.
         self._reward_fn: Reward = reward_fn if reward_fn is not None else RewardOnlyWinning()
+
+        self.opponent_pool = opponent_pool or []
+        self.current_opponents: list[FrozenPolicyOpponent] = []
+        self._opponent_by_seat: dict[int, FrozenPolicyOpponent] = {}
 
         self.base_env = gym.make(env_id)
 
@@ -85,6 +104,16 @@ class SingleAgentWrapper(gym.Env):
         if seed is not None:
             self._seed = seed
             self._rng = np.random.default_rng(seed)
+
+        if len(self.opponent_pool) < 1:
+            raise RuntimeError("opponent_pool must contain at least one model path")
+
+        self.current_opponents = random.choices(self.opponent_pool, k=3)
+        self.current_opponents = [
+            FrozenPolicyOpponent(path) for path in self.current_opponents
+        ]
+        opponent_seats = [seat for seat in range(4) if seat != self.learning_seat]
+        self._opponent_by_seat = dict(zip(opponent_seats, self.current_opponents))
 
         with _silence():
             reset_out = self.base_env.reset(seed=self._seed, options=options)
@@ -188,8 +217,16 @@ class SingleAgentWrapper(gym.Env):
             if valid_actions.size == 0:
                 raise RuntimeError("No valid actions available for non-learning player")
 
-            random_action = int(self._rng.choice(valid_actions))
-            step = self._step_base(random_action)
+            current_player = self._current_player(current_info)
+            opponent = self._opponent_by_seat.get(current_player)
+            if opponent is None:
+                raise RuntimeError(f"No frozen opponent mapped for seat {current_player}")
+
+            action = opponent.act(current_obs, mask)
+            if action not in valid_actions:
+                raise RuntimeError(f"Frozen opponent produced illegal action {action}")
+
+            step = self._step_base(action)
             total_reward += step.reward
             current_obs, current_info = step.obs, step.info
             terminated, truncated = step.terminated, step.truncated
