@@ -59,7 +59,7 @@ class FrozenPolicyOpponent:
     def __init__(self, model_path: str) -> None:
         self.model = MaskablePPO.load(model_path)
 
-    def act(self, obs, mask):
+    def act(self, obs: Any, mask: np.ndarray) -> int:
         """Select an action for the opponent given an observation and mask.
 
         Parameters
@@ -134,16 +134,19 @@ class SingleAgentWrapper(gym.Env):
             self._seed = seed
             self._rng = np.random.default_rng(seed)
 
-        if len(self.opponent_pool) < 1:
-            raise RuntimeError("opponent_pool must contain at least one model path")
-
-        self.current_opponents = list(self._rng.choice(self.opponent_pool, size=3))
-        self.current_opponents = [
-            FrozenPolicyOpponent(path) for path in self.current_opponents
-        ]
-        opponent_seats = [seat for seat in range(4) if seat != self.learning_seat]
-        self._opponent_by_seat = dict(zip(opponent_seats, self.current_opponents))
-
+        # Configure frozen-policy opponents only if an opponent_pool was provided.
+        pool = getattr(self, "opponent_pool", None)
+        if pool:
+            self.current_opponents = random.choices(pool, k=3)
+            self.current_opponents = [
+                FrozenPolicyOpponent(path) for path in self.current_opponents
+            ]
+            opponent_seats = [seat for seat in range(4) if seat != self.learning_seat]
+            self._opponent_by_seat = dict(zip(opponent_seats, self.current_opponents))
+        else:
+            # No opponent_pool configured: fall back to non-frozen opponents (e.g. random).
+            self.current_opponents = []
+            self._opponent_by_seat = {}
         with _silence():
             reset_out = self.base_env.reset(seed=self._seed, options=options)
         if isinstance(reset_out, tuple) and len(reset_out) == 2:
