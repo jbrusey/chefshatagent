@@ -108,7 +108,7 @@ class SingleAgentWrapper(gym.Env):
         if len(self.opponent_pool) < 1:
             raise RuntimeError("opponent_pool must contain at least one model path")
 
-        self.current_opponents = random.choices(self.opponent_pool, k=3)
+        self.current_opponents = list(self._rng.choice(self.opponent_pool, size=3))
         self.current_opponents = [
             FrozenPolicyOpponent(path) for path in self.current_opponents
         ]
