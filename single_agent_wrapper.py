@@ -133,13 +133,15 @@ class SingleAgentWrapper(gym.Env):
             self._seed = seed
             self._rng = np.random.default_rng(seed)
 
-        if self.opponent_pool:
-            chosen = list(self._rng.choice(self.opponent_pool, size=3))
-            opponents = [FrozenPolicyOpponent(path) for path in chosen]
-            opponent_seats = [seat for seat in range(4) if seat != self.learning_seat]
-            self._opponent_by_seat = dict(zip(opponent_seats, opponents))
-        else:
-            self._opponent_by_seat = {}
+        if not self.opponent_pool:
+            raise RuntimeError(
+                "opponent_pool is empty; provide at least one model path when constructing SingleAgentWrapper."
+            )
+
+        chosen = list(self._rng.choice(self.opponent_pool, size=3))
+        opponents = [FrozenPolicyOpponent(path) for path in chosen]
+        opponent_seats = [seat for seat in range(4) if seat != self.learning_seat]
+        self._opponent_by_seat = dict(zip(opponent_seats, opponents))
 
         with _silence():
             reset_out = self.base_env.reset(seed=self._seed, options=options)
