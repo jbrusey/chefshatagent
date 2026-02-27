@@ -98,3 +98,25 @@ def test_illegal_action_rejected(env):
 
     with pytest.raises(ValueError):
         env.step(0)
+
+
+def test_init_without_start_experiment(monkeypatch):
+    class MinimalEnv(gym.Env):
+        def __init__(self):
+            self.observation_space = gym.spaces.Box(low=0, high=1, shape=(30,), dtype=np.float32)
+            self.action_space = gym.spaces.Discrete(2)
+
+        def reset(self, *, seed=None, options=None):
+            return np.zeros(30, dtype=np.float32), {"current_player": 0}
+
+        def step(self, action):
+            return np.zeros(30, dtype=np.float32), 0.0, True, False, {"current_player": 0}
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr("single_agent_wrapper.gym.make", lambda _env_id: MinimalEnv())
+
+    wrapper = SingleAgentWrapper(seed=123)
+
+    assert wrapper.base_env.__class__.__name__ == "MinimalEnv"

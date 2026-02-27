@@ -60,13 +60,14 @@ class SingleAgentWrapper(gym.Env):
 
         self.base_env = gym.make(env_id)
 
-        # Start experiment once
-        with _silence():
-            self.base_env.startExperiment(
-                playerNames=["RL", "Random1", "Random2", "Random3"],
-                logDirectory="log",
-                verbose=False
-            )
+        # Start experiment once when the backend environment supports it.
+        if hasattr(self.base_env, "startExperiment"):
+            with _silence():
+                self.base_env.startExperiment(
+                    playerNames=["RL", "Random1", "Random2", "Random3"],
+                    logDirectory="log",
+                    verbose=False
+                )
         self.observation_space = self.base_env.observation_space
         self.action_space = self.base_env.action_space
 
