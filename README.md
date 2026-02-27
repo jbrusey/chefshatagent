@@ -20,7 +20,7 @@ uv pip install -e .
 uv run train.py
 ```
 
-Training runs for `1_000_000` timesteps and saves the model to:
+Training runs for `200_000` timesteps and saves the model to:
 
 - `models/ppo_chefhats_masked`
 
