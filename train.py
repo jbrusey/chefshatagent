@@ -46,6 +46,16 @@ class WinRateCallback(BaseCallback):
 
 
 def main() -> None:
+    MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    # Bootstrap: if no latest model exists yet, create and save a fresh one.
+    if not LATEST_MODEL_PATH.exists():
+        _env = SingleAgentWrapper(env_id="chefshat-v1", learning_seat=0, seed=SEED)
+        try:
+            MaskablePPO("MlpPolicy", _env, gamma=GAMMA, seed=SEED).save(str(LATEST_MODEL_PATH))
+        finally:
+            _env.close()
+
     opponent_pool = [str(LATEST_MODEL_PATH)]
     env = SingleAgentWrapper(
         env_id="chefshat-v1",
@@ -54,15 +64,12 @@ def main() -> None:
         opponent_pool=opponent_pool,
     )
 
-
     model = MaskablePPO.load(
         str(LATEST_MODEL_PATH),
         env=env,
     )
     model.gamma = GAMMA
     model.seed = SEED
-
-    MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
 
     try:
         for iteration in range(1, SELF_PLAY_ITERATIONS + 1):

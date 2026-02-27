@@ -3,7 +3,6 @@ from __future__ import annotations
 import contextlib
 import io
 import logging
-import random
 from dataclasses import dataclass
 from typing import Any
 
@@ -105,15 +104,13 @@ class SingleAgentWrapper(gym.Env):
             self._seed = seed
             self._rng = np.random.default_rng(seed)
 
-        if len(self.opponent_pool) < 1:
-            raise RuntimeError("opponent_pool must contain at least one model path")
-
-        self.current_opponents = list(self._rng.choice(self.opponent_pool, size=3))
-        self.current_opponents = [
-            FrozenPolicyOpponent(path) for path in self.current_opponents
-        ]
-        opponent_seats = [seat for seat in range(4) if seat != self.learning_seat]
-        self._opponent_by_seat = dict(zip(opponent_seats, self.current_opponents))
+        if self.opponent_pool:
+            chosen = list(self._rng.choice(self.opponent_pool, size=3))
+            opponents = [FrozenPolicyOpponent(path) for path in chosen]
+            opponent_seats = [seat for seat in range(4) if seat != self.learning_seat]
+            self._opponent_by_seat = dict(zip(opponent_seats, opponents))
+        else:
+            self._opponent_by_seat = {}
 
         with _silence():
             reset_out = self.base_env.reset(seed=self._seed, options=options)
@@ -219,12 +216,12 @@ class SingleAgentWrapper(gym.Env):
 
             current_player = self._current_player(current_info)
             opponent = self._opponent_by_seat.get(current_player)
-            if opponent is None:
-                raise RuntimeError(f"No frozen opponent mapped for seat {current_player}")
-
-            action = opponent.act(current_obs, mask)
-            if action not in valid_actions:
-                raise RuntimeError(f"Frozen opponent produced illegal action {action}")
+            if opponent is not None:
+                action = opponent.act(current_obs, mask)
+                if action not in valid_actions:
+                    raise RuntimeError(f"Frozen opponent produced illegal action {action}")
+            else:
+                action = int(self._rng.choice(valid_actions))
 
             step = self._step_base(action)
             total_reward += step.reward
