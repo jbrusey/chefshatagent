@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-import ChefsHatGym.env
 
 import gym
 import numpy as np

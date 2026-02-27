@@ -8,6 +8,7 @@ from typing import Any
 
 import gym
 import numpy as np
+import ChefsHatGym.env  # Registers gym.make("chefshat-v1") environment.
 from ChefsHatGym.rewards.only_winning import RewardOnlyWinning
 from ChefsHatGym.rewards.reward import Reward
 
