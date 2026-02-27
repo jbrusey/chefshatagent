@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from sb3_contrib import MaskablePPO
@@ -23,9 +25,15 @@ class WinRateCallback(BaseCallback):
     The rate is computed over all episodes completed since the last rollout log.
     """
 
-    def __init__(self, learning_seat: int = 0, verbose: int = 0):
+    def __init__(
+        self,
+        learning_seat: int = 0,
+        verbose: int = 0,
+        wandb_run: Any | None = None,
+    ):
         super().__init__(verbose)
         self.learning_seat = learning_seat
+        self.wandb_run = wandb_run
         self._episode_outcomes: list[int] = []  # 1 = win, 0 = loss
 
     def _on_step(self) -> bool:
@@ -42,10 +50,60 @@ class WinRateCallback(BaseCallback):
         if self._episode_outcomes:
             win_rate = float(np.mean(self._episode_outcomes))
             self.logger.record("rollout/win_rate", win_rate)
+            if self.wandb_run is not None:
+                self.wandb_run.log(
+                    {
+                        "rollout/win_rate": win_rate,
+                        "timesteps": self.num_timesteps,
+                    },
+                    step=self.num_timesteps,
+                )
             self._episode_outcomes.clear()
 
 
+def _build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Train MaskablePPO for Chef's Hat self-play")
+    parser.add_argument(
+        "--wandb",
+        action="store_true",
+        help="Enable Weights & Biases logging (requires `uv pip install wandb`).",
+    )
+    parser.add_argument(
+        "--wandb-project",
+        default="chefhats-rl",
+        help="wandb project name when --wandb is enabled.",
+    )
+    parser.add_argument(
+        "--wandb-run-name",
+        default=None,
+        help="Optional wandb run name when --wandb is enabled.",
+    )
+    return parser
+
+
 def main() -> None:
+    args = _build_arg_parser().parse_args()
+
+    wandb_run = None
+    if args.wandb:
+        try:
+            import wandb
+        except ImportError as exc:
+            raise RuntimeError(
+                "--wandb was set but the `wandb` package is not installed. "
+                "Install it with `uv pip install wandb`."
+            ) from exc
+
+        wandb_run = wandb.init(
+            project=args.wandb_project,
+            name=args.wandb_run_name,
+            config={
+                "seed": SEED,
+                "gamma": GAMMA,
+                "total_timesteps": TOTAL_TIMESTEPS,
+                "self_play_iterations": SELF_PLAY_ITERATIONS,
+            },
+        )
     MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
 
     # Bootstrap: if no latest model exists yet, create and save a fresh one.
@@ -91,7 +149,12 @@ def main() -> None:
 
             model.learn(
                 total_timesteps=TOTAL_TIMESTEPS,
-                callback=CallbackList([WinRateCallback(learning_seat=0), checkpoint_callback]),
+                callback=CallbackList(
+                    [
+                        WinRateCallback(learning_seat=0, wandb_run=wandb_run),
+                        checkpoint_callback,
+                    ]
+                ),
                 reset_num_timesteps=False,
             )
 
@@ -102,6 +165,8 @@ def main() -> None:
             print(f"Iteration {iteration}: saved snapshot to {snapshot_path}")
     finally:
         env.close()
+        if wandb_run is not None:
+            wandb_run.finish()
 
 
 if __name__ == "__main__":

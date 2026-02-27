@@ -20,6 +20,13 @@ uv pip install -e .
 uv run train.py
 ```
 
+To stream the rollout win rate (`rollout/win_rate`) to [Weights & Biases](https://wandb.ai):
+
+```bash
+uv pip install wandb
+uv run train.py --wandb --wandb-project chefhats-rl --wandb-run-name self-play-seed42
+```
+
 Training runs for `200_000` timesteps and saves the model to:
 
 - `models/ppo_chefhats_masked`

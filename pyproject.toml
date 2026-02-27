@@ -15,6 +15,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+
+wandb = [
+  "wandb",
+]
 test = [
   "pytest",
 ]
