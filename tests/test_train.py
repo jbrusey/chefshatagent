@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 
@@ -16,7 +16,7 @@ class DummyLogger:
 def test_win_rate_callback_logs_to_sb3_and_wandb():
     wandb_run = MagicMock()
     callback = WinRateCallback(learning_seat=0, wandb_run=wandb_run)
-    callback.logger = DummyLogger()
+    dummy_logger = DummyLogger()
 
     callback.locals = {
         "dones": [True, True, False],
@@ -28,10 +28,11 @@ def test_win_rate_callback_logs_to_sb3_and_wandb():
     }
     callback.num_timesteps = 128
 
-    assert callback._on_step() is True
-    callback._on_rollout_end()
+    with patch.object(type(callback), "logger", new_callable=PropertyMock, return_value=dummy_logger):
+        assert callback._on_step() is True
+        callback._on_rollout_end()
 
-    assert callback.logger.records == [("rollout/win_rate", pytest.approx(0.5))]
+    assert dummy_logger.records == [("rollout/win_rate", pytest.approx(0.5))]
     wandb_run.log.assert_called_once_with(
         {"rollout/win_rate": pytest.approx(0.5), "timesteps": 128},
         step=128,
