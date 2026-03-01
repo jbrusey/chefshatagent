@@ -50,15 +50,37 @@ class WinRateCallback(BaseCallback):
         if self._episode_outcomes:
             win_rate = float(np.mean(self._episode_outcomes))
             self.logger.record("rollout/win_rate", win_rate)
-            if self.wandb_run is not None:
-                self.wandb_run.log(
-                    {
-                        "rollout/win_rate": win_rate,
-                        "timesteps": self.num_timesteps,
-                    },
-                    step=self.num_timesteps,
-                )
             self._episode_outcomes.clear()
+
+
+class WandbMetricsCallback(BaseCallback):
+    """Mirrors SB3 scalar logger outputs to Weights & Biases.
+
+    This captures the standard PPO diagnostics (e.g. fps, policy/value losses,
+    entropy, explained variance, KL) whenever they are present in the SB3 logger,
+    and logs them with `num_timesteps` as the global step.
+    """
+
+    def __init__(self, wandb_run: Any, verbose: int = 0):
+        super().__init__(verbose)
+        self.wandb_run = wandb_run
+
+    def _on_step(self) -> bool:
+        return True
+
+    def _on_rollout_end(self) -> None:
+        logger_values = getattr(self.model.logger, "name_to_value", {})
+        metrics: dict[str, float | int] = {}
+
+        for key, value in logger_values.items():
+            if isinstance(value, np.generic):
+                metrics[key] = value.item()
+            elif isinstance(value, (float, int)):
+                metrics[key] = value
+
+        if metrics:
+            metrics["timesteps"] = self.num_timesteps
+            self.wandb_run.log(metrics, step=self.num_timesteps)
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
@@ -147,14 +169,16 @@ def main() -> None:
                 name_prefix=f"{MODEL_PATH.name}_iter_{iteration}",
             )
 
+            callbacks: list[BaseCallback] = [
+                WinRateCallback(learning_seat=0, wandb_run=wandb_run),
+                checkpoint_callback,
+            ]
+            if wandb_run is not None:
+                callbacks.append(WandbMetricsCallback(wandb_run=wandb_run))
+
             model.learn(
                 total_timesteps=TOTAL_TIMESTEPS,
-                callback=CallbackList(
-                    [
-                        WinRateCallback(learning_seat=0, wandb_run=wandb_run),
-                        checkpoint_callback,
-                    ]
-                ),
+                callback=CallbackList(callbacks),
                 reset_num_timesteps=False,
             )
 
