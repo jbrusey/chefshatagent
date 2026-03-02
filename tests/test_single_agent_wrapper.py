@@ -4,7 +4,7 @@ import gym
 import numpy as np
 import pytest
 
-from evaluate import _resolve_model_path
+from utils import resolve_model_path as _resolve_model_path
 from single_agent_wrapper import FrozenPolicyOpponent, SingleAgentWrapper
 
 

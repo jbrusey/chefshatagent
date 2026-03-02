@@ -1,41 +1,20 @@
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 import numpy as np
 from sb3_contrib import MaskablePPO
 
 from single_agent_wrapper import SingleAgentWrapper
+from utils import resolve_model_path
 
 SEED = 42
 N_EPISODES = 100
 MODEL_PATH = Path("models/ppo_chefhats_masked")
 LEARNING_SEAT = 0
 
-
-def _resolve_model_path(model_path: Path) -> Path:
-    """Return the final model if it exists, otherwise the latest checkpoint."""
-    if Path(str(model_path) + ".zip").exists():
-        return model_path
-
-    def _step_count(p: Path) -> int:
-        m = re.search(r"_(\d+)_steps", p.stem)
-        return int(m.group(1)) if m else 0
-
-    checkpoints = sorted(
-        (p for p in model_path.parent.glob(f"{model_path.name}_*_steps.zip")
-         if re.search(r"_(\d+)_steps", p.stem)),
-        key=_step_count,
-    )
-    if checkpoints:
-        latest = checkpoints[-1]
-        print(f"Final model not found — loading latest checkpoint: {latest.name}")
-        return latest.with_suffix("")
-    raise FileNotFoundError(
-        f"No model found at {model_path}.zip and no checkpoints in {model_path.parent}. "
-        "Run train.py first."
-    )
+# Backward-compatible alias so existing callers using _resolve_model_path continue to work.
+_resolve_model_path = resolve_model_path
 
 
 def _is_win(info: dict, learning_seat: int) -> bool:

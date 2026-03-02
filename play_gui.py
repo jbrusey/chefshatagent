@@ -8,10 +8,20 @@ import numpy as np
 import ChefsHatGym.env  # noqa: F401  # Registers gym.make("chefshat-v1") environment.
 from sb3_contrib import MaskablePPO
 
-from evaluate import _resolve_model_path
+from utils import resolve_model_path
 
 
 DEFAULT_MODEL_PATH = Path("models/ppo_chefhats_masked")
+
+
+def _positive_int(value: str, arg_name: str) -> int:
+    try:
+        v = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{arg_name} must be a positive integer, got: {value!r}")
+    if v < 1:
+        raise argparse.ArgumentTypeError(f"{arg_name} must be >= 1, got {v}")
+    return v
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
@@ -21,7 +31,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model-path", type=Path, default=DEFAULT_MODEL_PATH)
     parser.add_argument("--env-id", default="chefshat-v1")
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--episodes", type=int, default=1)
+    parser.add_argument("--episodes", type=lambda v: _positive_int(v, "--episodes"), default=1)
     parser.add_argument("--learning-seat", type=int, default=0, choices=[0, 1, 2, 3])
     parser.add_argument(
         "--deterministic",
@@ -56,8 +66,19 @@ def _to_one_hot(action: int, action_count: int) -> np.ndarray:
     return one_hot
 
 
-def _current_player(info: dict, fallback_seat: int) -> int:
-    return int(info.get("current_player", fallback_seat))
+def _current_player(info: dict, env: gym.Env) -> int:
+    candidates = [
+        info.get("current_player"),
+        info.get("currentPlayer"),
+        getattr(env, "current_player", None),
+        getattr(env, "currentPlayer", None),
+        getattr(getattr(env, "unwrapped", None), "current_player", None),
+        getattr(getattr(env, "unwrapped", None), "currentPlayer", None),
+    ]
+    for value in candidates:
+        if value is not None:
+            return int(value)
+    raise RuntimeError("Could not determine current player from env info/attributes")
 
 
 def _play_episode(
@@ -74,7 +95,7 @@ def _play_episode(
     truncated = False
 
     while not (terminated or truncated):
-        current_player = _current_player(info, learning_seat)
+        current_player = _current_player(info, env)
         mask = _action_mask_from_obs(obs, env.action_space.n)
         valid_actions = np.flatnonzero(mask)
         if valid_actions.size == 0:
@@ -100,7 +121,7 @@ def _play_episode(
 def main() -> None:
     args = _build_arg_parser().parse_args()
 
-    resolved_model = _resolve_model_path(args.model_path)
+    resolved_model = resolve_model_path(args.model_path)
     model = MaskablePPO.load(str(resolved_model))
     print(f"Loaded model: {resolved_model}")
 
