@@ -4,7 +4,7 @@ import gym
 import numpy as np
 import pytest
 
-from utils import resolve_model_path as _resolve_model_path
+from utils import resolve_model_path
 from single_agent_wrapper import FrozenPolicyOpponent, SingleAgentWrapper
 
 
@@ -333,14 +333,14 @@ def test_advance_raises_when_frozen_opponent_picks_illegal_action(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Tests for evaluate._resolve_model_path
+# Tests for utils.resolve_model_path
 # ---------------------------------------------------------------------------
 
 def test_resolve_model_path_final_model(tmp_path):
     """Returns the base path when the .zip final model exists."""
     model_path = tmp_path / "mymodel"
     (tmp_path / "mymodel.zip").touch()
-    assert _resolve_model_path(model_path) == model_path
+    assert resolve_model_path(model_path) == model_path
 
 
 def test_resolve_model_path_latest_checkpoint_numeric(tmp_path):
@@ -351,7 +351,7 @@ def test_resolve_model_path_latest_checkpoint_numeric(tmp_path):
     for steps in [10000, 20000, 100000, 200000]:
         (tmp_path / f"mymodel_{steps}_steps.zip").touch()
 
-    resolved = _resolve_model_path(model_path)
+    resolved = resolve_model_path(model_path)
     assert resolved == tmp_path / "mymodel_200000_steps"
 
 
@@ -359,4 +359,4 @@ def test_resolve_model_path_no_model_raises(tmp_path):
     """Raises FileNotFoundError when no model or checkpoint exists."""
     model_path = tmp_path / "missing"
     with pytest.raises(FileNotFoundError):
-        _resolve_model_path(model_path)
+        resolve_model_path(model_path)
