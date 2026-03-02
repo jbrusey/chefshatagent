@@ -48,3 +48,21 @@ Evaluation runs 100 games and prints:
 ```bash
 uv run pytest -v
 ```
+
+## Play a trained model with the Chef's Hat GUI/logging
+
+After you have a trained model (`models/ppo_chefhats_masked.zip`), run:
+
+```bash
+uv run play_gui.py --episodes 1 --verbose
+```
+
+Useful flags:
+
+- `--model-path models/ppo_chefhats_masked` to choose a different model/checkpoint prefix
+- `--learning-seat 0|1|2|3` to control which seat uses the trained model
+- `--no-deterministic` to sample policy actions instead of greedy actions
+- `--log-directory log` to choose where ChefsHat logs are written
+
+This script runs the real `chefshat-v1` environment (not the single-agent training wrapper),
+uses action masks for the trained seat, and plays random valid actions for the other seats.
