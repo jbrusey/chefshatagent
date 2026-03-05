@@ -9,7 +9,7 @@ import numpy as np
 from sb3_contrib import MaskablePPO
 from stable_baselines3.common.callbacks import BaseCallback, CallbackList, CheckpointCallback
 
-from single_agent_wrapper import SingleAgentWrapper
+from single_agent_wrapper import RANDOM_OPPONENT_TOKEN, SingleAgentWrapper
 
 SEED = 42
 GAMMA = 0.99
@@ -17,7 +17,6 @@ TOTAL_TIMESTEPS = 200_000
 SELF_PLAY_ITERATIONS = 5
 MODEL_PATH = Path("models/ppo_chefhats_masked")
 LATEST_MODEL_PATH = Path("models/latest.zip")
-RANDOM_OPPONENT_TOKEN = "__RANDOM__"
 
 
 def _snapshot_sort_key(path: Path) -> tuple[int, float, str]:
@@ -28,7 +27,7 @@ def _snapshot_sort_key(path: Path) -> tuple[int, float, str]:
 
 def build_initial_opponent_pool(models_dir: Path) -> list[str]:
     """Build deterministic initial opponent pool from available frozen models."""
-    latest = models_dir / "latest.zip"
+    latest = models_dir / LATEST_MODEL_PATH.name
     pool: list[str] = []
     if latest.exists():
         pool.append(str(latest))
