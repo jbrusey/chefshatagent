@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 from pathlib import Path
 from typing import Any
 
@@ -8,7 +9,7 @@ import numpy as np
 from sb3_contrib import MaskablePPO
 from stable_baselines3.common.callbacks import BaseCallback, CallbackList, CheckpointCallback
 
-from single_agent_wrapper import SingleAgentWrapper
+from single_agent_wrapper import RANDOM_OPPONENT_TOKEN, SingleAgentWrapper
 
 SEED = 42
 GAMMA = 0.99
@@ -16,6 +17,29 @@ TOTAL_TIMESTEPS = 200_000
 SELF_PLAY_ITERATIONS = 5
 MODEL_PATH = Path("models/ppo_chefhats_masked")
 LATEST_MODEL_PATH = Path("models/latest.zip")
+
+
+def _snapshot_sort_key(path: Path) -> tuple[int, float, str]:
+    match = re.search(r"snapshot_(\d+)\.zip$", path.name)
+    iteration = int(match.group(1)) if match else -1
+    return (iteration, path.stat().st_mtime, path.name)
+
+
+def build_initial_opponent_pool(models_dir: Path) -> list[str]:
+    """Build deterministic initial opponent pool from available frozen models."""
+    latest = models_dir / LATEST_MODEL_PATH.name
+    pool: list[str] = []
+    if latest.exists():
+        pool.append(str(latest))
+
+    snapshots = sorted(models_dir.glob("snapshot_*.zip"), key=_snapshot_sort_key, reverse=True)
+    for snapshot_path in snapshots[:4]:
+        snapshot_str = str(snapshot_path)
+        if snapshot_str not in pool:
+            pool.append(snapshot_str)
+
+    pool.append(RANDOM_OPPONENT_TOKEN)
+    return pool
 
 
 class WinRateCallback(BaseCallback):
@@ -136,7 +160,8 @@ def main() -> None:
         finally:
             _env.close()
 
-    opponent_pool = [str(LATEST_MODEL_PATH)]
+    opponent_pool = build_initial_opponent_pool(MODEL_PATH.parent)
+    print(f"Initial opponent pool: {opponent_pool}")
     env = SingleAgentWrapper(
         env_id="chefshat-v1",
         learning_seat=0,

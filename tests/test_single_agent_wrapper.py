@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 from utils import resolve_model_path
-from single_agent_wrapper import FrozenPolicyOpponent, SingleAgentWrapper
+from single_agent_wrapper import FrozenPolicyOpponent, SingleAgentWrapper, RANDOM_OPPONENT_TOKEN
 
 
 class DummyChefsHatEnv(gym.Env):
@@ -360,3 +360,111 @@ def test_resolve_model_path_no_model_raises(tmp_path):
     model_path = tmp_path / "missing"
     with pytest.raises(FileNotFoundError):
         resolve_model_path(model_path)
+
+
+# ---------------------------------------------------------------------------
+# Tests for RANDOM_OPPONENT_TOKEN path in reset()
+# ---------------------------------------------------------------------------
+
+def test_reset_random_token_skips_frozen_opponent_creation(monkeypatch):
+    """reset() does not create FrozenPolicyOpponent for seats assigned RANDOM_OPPONENT_TOKEN."""
+    monkeypatch.setattr("single_agent_wrapper.gym.make", lambda _env_id: DummyChefsHatEnv())
+    created_paths = []
+
+    def mock_frozen(path):
+        created_paths.append(path)
+        return DummyOpponent()
+
+    monkeypatch.setattr("single_agent_wrapper.FrozenPolicyOpponent", mock_frozen)
+    # Pool has only random tokens — no FrozenPolicyOpponent should be created
+    pool = [RANDOM_OPPONENT_TOKEN, RANDOM_OPPONENT_TOKEN, RANDOM_OPPONENT_TOKEN]
+    wrapper = SingleAgentWrapper(seed=0, opponent_pool=pool)
+    wrapper.reset()
+
+    assert created_paths == []
+
+
+def test_reset_random_token_seats_absent_from_opponent_by_seat(monkeypatch):
+    """Seats assigned RANDOM_OPPONENT_TOKEN are absent from _opponent_by_seat."""
+    monkeypatch.setattr("single_agent_wrapper.gym.make", lambda _env_id: DummyChefsHatEnv())
+    monkeypatch.setattr("single_agent_wrapper.FrozenPolicyOpponent", lambda path: DummyOpponent())
+
+    # Only random tokens in pool — _opponent_by_seat should remain empty
+    pool = [RANDOM_OPPONENT_TOKEN] * 3
+    wrapper = SingleAgentWrapper(seed=0, opponent_pool=pool)
+    wrapper.reset()
+
+    assert wrapper._opponent_by_seat == {}
+
+
+def test_reset_random_token_mixed_pool_partial_frozen(monkeypatch):
+    """When pool mixes model paths and RANDOM token, only model-path seats get FrozenPolicyOpponent."""
+    monkeypatch.setattr("single_agent_wrapper.gym.make", lambda _env_id: DummyChefsHatEnv())
+    created_paths = []
+
+    def mock_frozen(path):
+        created_paths.append(path)
+        return DummyOpponent()
+
+    monkeypatch.setattr("single_agent_wrapper.FrozenPolicyOpponent", mock_frozen)
+
+    # Pool has 2 model paths and 1 random token; with seed 0 the sample will pick a mix
+    pool = ["model_a", "model_b", RANDOM_OPPONENT_TOKEN]
+    wrapper = SingleAgentWrapper(seed=0, opponent_pool=pool)
+    wrapper.reset()
+
+    # At most 3 FrozenPolicyOpponent instances (no random token should be passed to it)
+    assert len(created_paths) <= 3
+    for path in created_paths:
+        assert path != RANDOM_OPPONENT_TOKEN
+
+
+def test_reset_random_token_deterministic_under_seed(monkeypatch):
+    """Same seed produces the same _opponent_by_seat assignment across two resets."""
+    monkeypatch.setattr("single_agent_wrapper.gym.make", lambda _env_id: DummyChefsHatEnv())
+    monkeypatch.setattr("single_agent_wrapper.FrozenPolicyOpponent", lambda path: DummyOpponent())
+
+    pool = ["model_a", "model_b", RANDOM_OPPONENT_TOKEN]
+    wrapper1 = SingleAgentWrapper(seed=7, opponent_pool=pool)
+    wrapper1.reset(seed=7)
+    seats_run1 = set(wrapper1._opponent_by_seat.keys())
+
+    wrapper2 = SingleAgentWrapper(seed=7, opponent_pool=pool)
+    wrapper2.reset(seed=7)
+    seats_run2 = set(wrapper2._opponent_by_seat.keys())
+
+    assert seats_run1 == seats_run2
+
+
+def test_reset_random_token_falls_back_to_random_actions(monkeypatch):
+    """Seats with RANDOM_OPPONENT_TOKEN use random legal actions (not a frozen policy)."""
+    call_log = []
+
+    class LoggingEnv(DummyChefsHatEnv):
+        """Env that records which actions are chosen for non-learning seats."""
+
+        def step(self, action):
+            call_log.append(int(np.argmax(action)))
+            return super().step(action)
+
+    frozen_created = []
+
+    def mock_frozen(path):
+        frozen_created.append(path)
+        return DummyOpponent()
+
+    monkeypatch.setattr("single_agent_wrapper.gym.make", lambda _env_id: LoggingEnv())
+    monkeypatch.setattr("single_agent_wrapper.FrozenPolicyOpponent", mock_frozen)
+
+    pool = [RANDOM_OPPONENT_TOKEN] * 3
+    wrapper = SingleAgentWrapper(seed=42, opponent_pool=pool)
+    obs, info = wrapper.reset()
+
+    # No frozen models were loaded
+    assert frozen_created == []
+    # The wrapper completed without error and returned a valid observation
+    assert obs.shape == (228,)
+    # All recorded actions must be valid (non-negative integers)
+    for action_idx in call_log:
+        assert isinstance(action_idx, int)
+        assert action_idx >= 0
