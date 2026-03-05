@@ -15,6 +15,7 @@ from sb3_contrib import MaskablePPO
 
 GAMMA=0.99
 APPLY_SHAPING_ON_TERMINAL = True
+RANDOM_OPPONENT_TOKEN = "__RANDOM__"
 
 
 @contextlib.contextmanager
@@ -134,10 +135,14 @@ class SingleAgentWrapper(gym.Env):
             self._rng = np.random.default_rng(seed)
 
         if self.opponent_pool:
-            chosen = list(self._rng.choice(self.opponent_pool, size=3))
-            opponents = [FrozenPolicyOpponent(path) for path in chosen]
+            replace = len(self.opponent_pool) < 3
+            chosen = list(self._rng.choice(self.opponent_pool, size=3, replace=replace))
             opponent_seats = [seat for seat in range(4) if seat != self.learning_seat]
-            self._opponent_by_seat = dict(zip(opponent_seats, opponents))
+            self._opponent_by_seat = {}
+            for seat, opponent_id in zip(opponent_seats, chosen):
+                if opponent_id == RANDOM_OPPONENT_TOKEN:
+                    continue
+                self._opponent_by_seat[seat] = FrozenPolicyOpponent(opponent_id)
         else:
             self._opponent_by_seat = {}
 
