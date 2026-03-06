@@ -31,6 +31,11 @@ Training runs for `200_000` timesteps and saves the model to:
 
 - `models/ppo_chefhats_masked`
 
+During self-play, snapshots are scored with pairwise Elo (derived from multiplayer match
+rankings), and ratings are persisted to:
+
+- `models/elo_ratings.json`
+
 ## Evaluate
 
 ```bash
