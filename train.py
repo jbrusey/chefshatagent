@@ -88,7 +88,15 @@ def _resolve_seat_action(
     policy_cache: dict[str, MaskablePPO],
     rng: np.random.Generator,
 ) -> int:
-    mask = np.asarray(obs)[28:28 + action_space_n].astype(bool)
+    obs_array = np.asarray(obs).ravel()
+    start = 28
+    end = start + action_space_n
+    mask = obs_array[start:end].astype(bool)
+    if mask.size != action_space_n:
+        raise RuntimeError(
+            f"Expected action mask of length {action_space_n} starting at index {start}, "
+            f"but got slice of length {mask.size} from observation of length {obs_array.size}."
+        )
     valid_actions = np.flatnonzero(mask)
     if valid_actions.size == 0:
         raise RuntimeError("No valid actions available")
@@ -109,60 +117,49 @@ def _resolve_seat_action(
 
 
 def play_match_and_get_scores(
+    base_env: gym.Env,
     seat_agents: list[str],
     seed: int,
     policy_cache: dict[str, MaskablePPO],
 ) -> list[int]:
     rng = np.random.default_rng(seed)
-    base_env = gym.make("chefshat-v1")
-    try:
-        if hasattr(base_env, "startExperiment"):
-            with _silence():
-                base_env.startExperiment(
-                    playerNames=["Elo0", "Elo1", "Elo2", "Elo3"],
-                    logDirectory="log",
-                    verbose=False,
-                )
+    with _silence():
+        reset_out = base_env.reset(seed=seed)
 
+    if isinstance(reset_out, tuple) and len(reset_out) == 2:
+        obs, info = reset_out
+    else:
+        obs, info = reset_out, {}
+
+    terminated = False
+    truncated = False
+    while not (terminated or truncated):
+        current_player = _current_player(base_env, info)
+        action = _resolve_seat_action(
+            seat_agent=seat_agents[current_player],
+            obs=obs,
+            action_space_n=base_env.action_space.n,
+            policy_cache=policy_cache,
+            rng=rng,
+        )
+
+        action_vec = np.zeros(base_env.action_space.n, dtype=np.float32)
+        action_vec[action] = 1.0
         with _silence():
-            reset_out = base_env.reset(seed=seed)
+            step_out = base_env.step(action_vec)
 
-        if isinstance(reset_out, tuple) and len(reset_out) == 2:
-            obs, info = reset_out
+        if isinstance(step_out, tuple) and len(step_out) == 5:
+            obs, _reward, terminated, truncated, info = step_out
+        elif isinstance(step_out, tuple) and len(step_out) == 4:
+            obs, _reward, done, info = step_out
+            terminated, truncated = bool(done), False
         else:
-            obs, info = reset_out, {}
+            raise RuntimeError("Unsupported environment step() return format")
 
-        terminated = False
-        truncated = False
-        while not (terminated or truncated):
-            current_player = _current_player(base_env, info)
-            action = _resolve_seat_action(
-                seat_agent=seat_agents[current_player],
-                obs=obs,
-                action_space_n=base_env.action_space.n,
-                policy_cache=policy_cache,
-                rng=rng,
-            )
-
-            action_vec = np.zeros(base_env.action_space.n, dtype=np.float32)
-            action_vec[action] = 1.0
-            with _silence():
-                step_out = base_env.step(action_vec)
-
-            if isinstance(step_out, tuple) and len(step_out) == 5:
-                obs, _reward, terminated, truncated, info = step_out
-            elif isinstance(step_out, tuple) and len(step_out) == 4:
-                obs, _reward, done, info = step_out
-                terminated, truncated = bool(done), False
-            else:
-                raise RuntimeError("Unsupported environment step() return format")
-
-        scores = info.get("Match_Score", [])
-        if not scores:
-            raise RuntimeError("Match_Score missing from terminal info")
-        return [int(v) for v in scores]
-    finally:
-        base_env.close()
+    scores = info.get("Match_Score", [])
+    if not scores:
+        raise RuntimeError("Match_Score missing from terminal info")
+    return [int(v) for v in scores]
 
 
 def evaluate_snapshot_elo(
@@ -174,32 +171,51 @@ def evaluate_snapshot_elo(
 ) -> None:
     policy_cache: dict[str, MaskablePPO] = {}
     rng = np.random.default_rng(seed)
+    base_env = gym.make("chefshat-v1")
+    try:
+        if hasattr(base_env, "startExperiment"):
+            with _silence():
+                base_env.startExperiment(
+                    playerNames=["Elo0", "Elo1", "Elo2", "Elo3"],
+                    logDirectory="log",
+                    verbose=False,
+                )
 
-    for _ in range(games):
-        if len(evaluation_pool) >= 3:
-            chosen = list(rng.choice(evaluation_pool, size=3, replace=False))
-        else:
-            chosen = list(rng.choice(evaluation_pool, size=3, replace=True))
+        for _ in range(games):
+            if len(evaluation_pool) >= 3:
+                chosen = list(rng.choice(evaluation_pool, size=3, replace=False))
+            else:
+                chosen = list(rng.choice(evaluation_pool, size=3, replace=True))
 
-        seat_agents = [snapshot_path, *chosen]
-        match_scores = play_match_and_get_scores(
-            seat_agents=seat_agents,
-            seed=int(rng.integers(0, 2**31 - 1)),
-            policy_cache=policy_cache,
-        )
-        update_ratings_from_match(
-            ratings=ratings,
-            players=seat_agents,
-            match_scores=match_scores,
-            k_factor=ELO_K_FACTOR,
-        )
+            seat_agents = [snapshot_path, *chosen]
+            match_scores = play_match_and_get_scores(
+                base_env=base_env,
+                seat_agents=seat_agents,
+                seed=int(rng.integers(0, 2**31 - 1)),
+                policy_cache=policy_cache,
+            )
+            update_ratings_from_match(
+                ratings=ratings,
+                players=seat_agents,
+                match_scores=match_scores,
+                k_factor=ELO_K_FACTOR,
+            )
+    finally:
+        base_env.close()
 
 
 def build_training_opponent_pool(ratings: dict[str, float], latest_model: str) -> list[str]:
-    rated_models = [path for path in top_rated_players(ratings, MAX_OPPONENT_POOL_SIZE) if Path(path).exists()]
-    if latest_model not in rated_models:
-        rated_models.insert(0, latest_model)
-    rated_models.append(RANDOM_OPPONENT_TOKEN)
+    rated_models = [
+        path for path in top_rated_players(ratings, MAX_OPPONENT_POOL_SIZE) if Path(path).exists()
+    ]
+    if latest_model in rated_models:
+        rated_models.remove(latest_model)
+    rated_models.insert(0, latest_model)
+
+    max_rated_without_random = max(MAX_OPPONENT_POOL_SIZE - 1, 1)
+    rated_models = rated_models[:max_rated_without_random]
+    if RANDOM_OPPONENT_TOKEN not in rated_models and len(rated_models) < MAX_OPPONENT_POOL_SIZE:
+        rated_models.append(RANDOM_OPPONENT_TOKEN)
     return rated_models
 
 
