@@ -5,10 +5,12 @@ import pytest
 
 from train import (
     MAX_OPPONENT_POOL_SIZE,
+    DEFAULT_ELO,
     _resolve_seat_action,
     build_training_opponent_pool,
     WandbMetricsCallback,
     WinRateCallback,
+    _log_current_player_elo_to_wandb,
     _build_arg_parser,
     build_initial_opponent_pool,
     LATEST_MODEL_PATH,
@@ -73,6 +75,32 @@ def test_wandb_metrics_callback_logs_scalar_sb3_metrics():
             "timesteps": 512,
         },
         step=512,
+    )
+
+
+def test_log_current_player_elo_to_wandb_logs_rollout_elo_metric():
+    wandb_run = MagicMock()
+
+    _log_current_player_elo_to_wandb(
+        wandb_run,
+        timesteps=10_000,
+        elo_rating=DEFAULT_ELO + 42,
+    )
+
+    wandb_run.log.assert_called_once_with(
+        {
+            "rollout/elo": pytest.approx(DEFAULT_ELO + 42),
+            "timesteps": 10_000,
+        },
+        step=10_000,
+    )
+
+
+def test_log_current_player_elo_to_wandb_noop_without_wandb():
+    _log_current_player_elo_to_wandb(
+        None,
+        timesteps=10_000,
+        elo_rating=DEFAULT_ELO,
     )
 
 def test_arg_parser_defaults():
