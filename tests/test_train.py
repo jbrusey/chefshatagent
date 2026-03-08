@@ -4,6 +4,9 @@ from unittest.mock import MagicMock, PropertyMock, patch
 import pytest
 
 from train import (
+    MAX_OPPONENT_POOL_SIZE,
+    _resolve_seat_action,
+    build_training_opponent_pool,
     WandbMetricsCallback,
     WinRateCallback,
     _build_arg_parser,
@@ -158,3 +161,63 @@ def test_build_initial_opponent_pool_uses_latest_model_path_name(tmp_path):
     pool = build_initial_opponent_pool(tmp_path)
 
     assert str(tmp_path / expected_name) in pool
+
+
+def test_build_training_opponent_pool_includes_latest_and_random(tmp_path):
+    latest = tmp_path / "latest.zip"
+    latest.touch()
+    top = tmp_path / "snapshot_10.zip"
+    top.touch()
+
+    pool = build_training_opponent_pool(
+        ratings={str(top): 1200.0},
+        latest_model=str(latest),
+    )
+
+    assert pool[0] == str(latest)
+    assert str(top) in pool
+    assert pool[-1] == RANDOM_OPPONENT_TOKEN
+
+
+def test_build_training_opponent_pool_respects_max_size(tmp_path):
+    latest = tmp_path / "latest.zip"
+    latest.touch()
+    ratings = {}
+    for i in range(MAX_OPPONENT_POOL_SIZE + 5):
+        path = tmp_path / f"snapshot_{i}.zip"
+        path.touch()
+        ratings[str(path)] = 1000.0 + i
+
+    pool = build_training_opponent_pool(ratings=ratings, latest_model=str(latest))
+
+    assert len(pool) <= MAX_OPPONENT_POOL_SIZE
+    assert pool[0] == str(latest)
+    assert pool[-1] == RANDOM_OPPONENT_TOKEN
+
+
+def test_build_training_opponent_pool_keeps_latest_first_without_duplication(tmp_path):
+    latest = tmp_path / "latest.zip"
+    latest.touch()
+    other = tmp_path / "snapshot_1.zip"
+    other.touch()
+    ratings = {
+        str(latest): 2000.0,
+        str(other): 1900.0,
+    }
+
+    pool = build_training_opponent_pool(ratings=ratings, latest_model=str(latest))
+
+    assert pool[0] == str(latest)
+    assert pool.count(str(latest)) == 1
+
+
+def test_resolve_seat_action_raises_on_short_observation():
+    rng = np.random.default_rng(0)
+    with pytest.raises(RuntimeError, match="Expected action mask of length"):
+        _resolve_seat_action(
+            seat_agent=RANDOM_OPPONENT_TOKEN,
+            obs=np.zeros(50, dtype=np.float32),
+            action_space_n=200,
+            policy_cache={},
+            rng=rng,
+        )

@@ -33,4 +33,4 @@ requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-py-modules = ["single_agent_wrapper", "train", "evaluate", "utils"]
+py-modules = ["single_agent_wrapper", "train", "evaluate", "utils", "population"]
