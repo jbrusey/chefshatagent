@@ -284,6 +284,24 @@ class WandbMetricsCallback(BaseCallback):
             self.wandb_run.log(metrics, step=self.num_timesteps)
 
 
+def _log_current_player_elo_to_wandb(
+    wandb_run: Any | None,
+    *,
+    timesteps: int,
+    elo_rating: float,
+) -> None:
+    if wandb_run is None:
+        return
+
+    wandb_run.log(
+        {
+            "rollout/elo": elo_rating,
+            "timesteps": timesteps,
+        },
+        step=timesteps,
+    )
+
+
 def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Train MaskablePPO for Chef's Hat self-play")
     parser.add_argument(
@@ -401,6 +419,14 @@ def main() -> None:
                 evaluation_pool=eval_candidates,
                 games=ELO_EVAL_GAMES,
                 seed=SEED + iteration,
+            )
+
+            current_player_elo = ratings.get(snapshot_key, DEFAULT_ELO)
+            ratings[str(LATEST_MODEL_PATH)] = current_player_elo
+            _log_current_player_elo_to_wandb(
+                wandb_run,
+                timesteps=model.num_timesteps,
+                elo_rating=current_player_elo,
             )
 
             save_ratings(ELO_RATINGS_PATH, ratings)
