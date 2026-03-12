@@ -10,10 +10,10 @@ from typing import Any
 
 import gym
 import numpy as np
-import ChefsHatGym.env  # noqa: F401  # Registers gym.make("chefshat-v1") environment.
 from sb3_contrib import MaskablePPO
 from stable_baselines3.common.callbacks import BaseCallback, CallbackList, CheckpointCallback
 
+from game_adapters import GameAdapter, get_game_adapter
 from population import DEFAULT_ELO, load_ratings, save_ratings, top_rated_players, update_ratings_from_match
 from single_agent_wrapper import RANDOM_OPPONENT_TOKEN, SingleAgentWrapper
 
@@ -85,18 +85,13 @@ def _resolve_seat_action(
     seat_agent: str,
     obs: np.ndarray,
     action_space_n: int,
+    adapter: GameAdapter,
     policy_cache: dict[str, MaskablePPO],
     rng: np.random.Generator,
 ) -> int:
-    obs_array = np.asarray(obs).ravel()
-    start = 28
-    end = start + action_space_n
-    mask = obs_array[start:end].astype(bool)
-    if mask.size != action_space_n:
-        raise RuntimeError(
-            f"Expected action mask of length {action_space_n} starting at index {start}, "
-            f"but got slice of length {mask.size} from observation of length {obs_array.size}."
-        )
+    mask = adapter.extract_valid_action_mask(obs, action_space_n)
+    if mask is None:
+        mask = np.ones(action_space_n, dtype=bool)
     valid_actions = np.flatnonzero(mask)
     if valid_actions.size == 0:
         raise RuntimeError("No valid actions available")
@@ -120,8 +115,9 @@ def play_match_and_get_scores(
     base_env: gym.Env,
     seat_agents: list[str],
     seed: int,
+    adapter: GameAdapter,
     policy_cache: dict[str, MaskablePPO],
-) -> list[int]:
+) -> list[float]:
     rng = np.random.default_rng(seed)
     with _silence():
         reset_out = base_env.reset(seed=seed)
@@ -139,14 +135,14 @@ def play_match_and_get_scores(
             seat_agent=seat_agents[current_player],
             obs=obs,
             action_space_n=base_env.action_space.n,
+            adapter=adapter,
             policy_cache=policy_cache,
             rng=rng,
         )
 
-        action_vec = np.zeros(base_env.action_space.n, dtype=np.float32)
-        action_vec[action] = 1.0
+        env_action = adapter.format_env_action(action, base_env.action_space.n)
         with _silence():
-            step_out = base_env.step(action_vec)
+            step_out = adapter.step_env(base_env, env_action)
 
         if isinstance(step_out, tuple) and len(step_out) == 5:
             obs, _reward, terminated, truncated, info = step_out
@@ -156,14 +152,21 @@ def play_match_and_get_scores(
         else:
             raise RuntimeError("Unsupported environment step() return format")
 
-    scores = info.get("Match_Score", [])
-    if not scores:
-        raise RuntimeError("Match_Score missing from terminal info")
-    return [int(v) for v in scores]
+    scores = info.get("Match_Score")
+    if scores:
+        return [float(v) for v in scores]
+
+    winner = info.get("winner")
+    if winner is not None:
+        winner_idx = int(winner)
+        return [1.0 if idx == winner_idx else 0.0 for idx in range(len(seat_agents))]
+
+    raise RuntimeError("Terminal score information missing from info")
 
 
 def evaluate_snapshot_elo(
     snapshot_path: str,
+    adapter: GameAdapter,
     ratings: dict[str, float],
     evaluation_pool: list[str],
     games: int,
@@ -171,7 +174,7 @@ def evaluate_snapshot_elo(
 ) -> None:
     policy_cache: dict[str, MaskablePPO] = {}
     rng = np.random.default_rng(seed)
-    base_env = gym.make("chefshat-v1")
+    base_env = adapter.make_env()
     try:
         if hasattr(base_env, "startExperiment"):
             with _silence():
@@ -192,6 +195,7 @@ def evaluate_snapshot_elo(
                 base_env=base_env,
                 seat_agents=seat_agents,
                 seed=int(rng.integers(0, 2**31 - 1)),
+                adapter=adapter,
                 policy_cache=policy_cache,
             )
             update_ratings_from_match(
@@ -222,18 +226,20 @@ def build_training_opponent_pool(ratings: dict[str, float], latest_model: str) -
 class WinRateCallback(BaseCallback):
     """Tracks win rate (1st place finishes) and logs it to the SB3 console output.
 
-    A 'win' is defined as Match_Score[learning_seat] == 3 (1st place / Chef).
+    A 'win' is delegated to the active game adapter.
     The rate is computed over all episodes completed since the last rollout log.
     """
 
     def __init__(
         self,
+        adapter: GameAdapter,
         learning_seat: int = 0,
         verbose: int = 0,
         wandb_run: Any | None = None,
     ):
         super().__init__(verbose)
         self.learning_seat = learning_seat
+        self.adapter = adapter
         self.wandb_run = wandb_run
         self._episode_outcomes: list[int] = []  # 1 = win, 0 = loss
 
@@ -241,10 +247,8 @@ class WinRateCallback(BaseCallback):
         # SB3 stores per-step info in self.locals["infos"] (list, one per env)
         for done, info in zip(self.locals["dones"], self.locals["infos"]):
             if done:
-                scores = info.get("Match_Score", [])
-                if scores:
-                    won = int(int(scores[self.learning_seat]) == 3)
-                    self._episode_outcomes.append(won)
+                won = int(self.adapter.is_win(info, self.learning_seat))
+                self._episode_outcomes.append(won)
         return True
 
     def _on_rollout_end(self) -> None:
@@ -303,7 +307,18 @@ def _log_current_player_elo_to_wandb(
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Train MaskablePPO for Chef's Hat self-play")
+    parser = argparse.ArgumentParser(description="Train MaskablePPO with self-play for a selected game")
+    parser.add_argument(
+        "--game",
+        choices=["chefshat", "irps"],
+        default="chefshat",
+        help="Game to train (selects the game adapter and default env id).",
+    )
+    parser.add_argument(
+        "--env-id",
+        default=None,
+        help="Optional Gym environment id override for the selected game adapter.",
+    )
     parser.add_argument(
         "--wandb",
         action="store_true",
@@ -324,6 +339,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = _build_arg_parser().parse_args()
+    adapter = get_game_adapter(args.game, env_id=args.env_id)
 
     wandb_run = None
     if args.wandb:
@@ -349,7 +365,7 @@ def main() -> None:
 
     # Bootstrap: if no latest model exists yet, create and save a fresh one.
     if not LATEST_MODEL_PATH.exists():
-        _env = SingleAgentWrapper(env_id="chefshat-v1", learning_seat=0, seed=SEED)
+        _env = SingleAgentWrapper(env_id=adapter.config.env_id, learning_seat=0, seed=SEED)
         try:
             MaskablePPO("MlpPolicy", _env, gamma=GAMMA, seed=SEED).save(str(LATEST_MODEL_PATH))
         finally:
@@ -360,7 +376,7 @@ def main() -> None:
     ratings.setdefault(str(LATEST_MODEL_PATH), DEFAULT_ELO)
     print(f"Initial opponent pool: {opponent_pool}")
     env = SingleAgentWrapper(
-        env_id="chefshat-v1",
+        env_id=adapter.config.env_id,
         learning_seat=0,
         seed=SEED,
         opponent_pool=opponent_pool,
@@ -378,7 +394,7 @@ def main() -> None:
             if iteration > 1:
                 env.close()
                 env = SingleAgentWrapper(
-                    env_id="chefshat-v1",
+                    env_id=adapter.config.env_id,
                     learning_seat=0,
                     seed=SEED,
                     opponent_pool=opponent_pool,
@@ -392,7 +408,7 @@ def main() -> None:
             )
 
             callbacks: list[BaseCallback] = [
-                WinRateCallback(learning_seat=0, wandb_run=wandb_run),
+                WinRateCallback(adapter=adapter, learning_seat=0, wandb_run=wandb_run),
                 checkpoint_callback,
             ]
             if wandb_run is not None:
@@ -415,6 +431,7 @@ def main() -> None:
                 eval_candidates = [str(LATEST_MODEL_PATH)]
             evaluate_snapshot_elo(
                 snapshot_path=snapshot_key,
+                adapter=adapter,
                 ratings=ratings,
                 evaluation_pool=eval_candidates,
                 games=ELO_EVAL_GAMES,
