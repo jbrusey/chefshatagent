@@ -118,7 +118,7 @@ class IrpsAdapter(GameAdapter):
     def extract_valid_action_mask(self, _obs: Any, action_space_n: int) -> np.ndarray:
         return np.ones(action_space_n, dtype=bool)
 
-    def format_env_action(self, policy_action: int, _action_space_n: int) -> int:
+    def format_env_action(self, policy_action: int, action_space_n: int) -> int:
         return int(policy_action)
 
 
