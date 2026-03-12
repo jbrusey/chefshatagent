@@ -307,12 +307,12 @@ def _log_current_player_elo_to_wandb(
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Train MaskablePPO for Chef's Hat self-play")
+    parser = argparse.ArgumentParser(description="Train MaskablePPO with self-play for a selected game")
     parser.add_argument(
         "--game",
         choices=["chefshat", "irps"],
         default="chefshat",
-        help="Game adapter to use for training/evaluation behavior.",
+        help="Game to train (selects the game adapter and default env id).",
     )
     parser.add_argument(
         "--env-id",
