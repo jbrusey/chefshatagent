@@ -3,11 +3,13 @@ from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 
+from game_adapters import ChefshatAdapter
 from train import (
     MAX_OPPONENT_POOL_SIZE,
     DEFAULT_ELO,
     _resolve_seat_action,
     build_training_opponent_pool,
+    _sample_seat_agents,
     WandbMetricsCallback,
     WinRateCallback,
     _log_current_player_elo_to_wandb,
@@ -27,7 +29,7 @@ class DummyLogger:
 
 
 def test_win_rate_callback_logs_to_sb3():
-    callback = WinRateCallback(learning_seat=0, wandb_run=MagicMock())
+    callback = WinRateCallback(adapter=ChefshatAdapter(), learning_seat=0, wandb_run=MagicMock())
     dummy_logger = DummyLogger()
 
     callback.locals = {
@@ -106,6 +108,8 @@ def test_log_current_player_elo_to_wandb_noop_without_wandb():
 def test_arg_parser_defaults():
     args = _build_arg_parser().parse_args([])
 
+    assert args.game == "chefshat"
+    assert args.env_id is None
     assert args.wandb is False
     assert args.wandb_project == "chefhats-rl"
     assert args.wandb_run_name is None
@@ -246,6 +250,48 @@ def test_resolve_seat_action_raises_on_short_observation():
             seat_agent=RANDOM_OPPONENT_TOKEN,
             obs=np.zeros(50, dtype=np.float32),
             action_space_n=200,
+            adapter=ChefshatAdapter(),
             policy_cache={},
+            rng=rng,
+        )
+
+
+def test_sample_seat_agents_uses_dynamic_seat_count_without_replacement():
+    rng = np.random.default_rng(0)
+    pool = ["a", "b", "c", "d"]
+
+    seats = _sample_seat_agents(
+        snapshot_path="latest",
+        evaluation_pool=pool,
+        seat_count=3,
+        rng=rng,
+    )
+
+    assert len(seats) == 3
+    assert seats[0] == "latest"
+    assert len(set(seats[1:])) == 2
+
+
+def test_sample_seat_agents_uses_replacement_when_pool_too_small():
+    rng = np.random.default_rng(0)
+
+    seats = _sample_seat_agents(
+        snapshot_path="latest",
+        evaluation_pool=["only"],
+        seat_count=4,
+        rng=rng,
+    )
+
+    assert seats == ["latest", "only", "only", "only"]
+
+
+def test_sample_seat_agents_rejects_invalid_seat_count():
+    rng = np.random.default_rng(0)
+
+    with pytest.raises(RuntimeError, match="Expected at least 2 seats"):
+        _sample_seat_agents(
+            snapshot_path="latest",
+            evaluation_pool=["a"],
+            seat_count=1,
             rng=rng,
         )
