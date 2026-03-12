@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 
+from game_adapters import ChefshatAdapter
 from train import (
     MAX_OPPONENT_POOL_SIZE,
     DEFAULT_ELO,
@@ -27,7 +28,7 @@ class DummyLogger:
 
 
 def test_win_rate_callback_logs_to_sb3():
-    callback = WinRateCallback(learning_seat=0, wandb_run=MagicMock())
+    callback = WinRateCallback(adapter=ChefshatAdapter(), learning_seat=0, wandb_run=MagicMock())
     dummy_logger = DummyLogger()
 
     callback.locals = {
@@ -106,6 +107,8 @@ def test_log_current_player_elo_to_wandb_noop_without_wandb():
 def test_arg_parser_defaults():
     args = _build_arg_parser().parse_args([])
 
+    assert args.game == "chefshat"
+    assert args.env_id is None
     assert args.wandb is False
     assert args.wandb_project == "chefhats-rl"
     assert args.wandb_run_name is None
@@ -246,6 +249,7 @@ def test_resolve_seat_action_raises_on_short_observation():
             seat_agent=RANDOM_OPPONENT_TOKEN,
             obs=np.zeros(50, dtype=np.float32),
             action_space_n=200,
+            adapter=ChefshatAdapter(),
             policy_cache={},
             rng=rng,
         )
