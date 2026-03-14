@@ -15,7 +15,8 @@ from stable_baselines3.common.callbacks import BaseCallback, CallbackList, Check
 
 from game_adapters import GameAdapter, get_game_adapter
 from population import DEFAULT_ELO, load_ratings, save_ratings, top_rated_players, update_ratings_from_match
-from single_agent_wrapper import RANDOM_OPPONENT_TOKEN, SingleAgentWrapper
+from irps_env import make_single_agent_env
+from single_agent_wrapper import RANDOM_OPPONENT_TOKEN
 
 SEED = 42
 GAMMA = 0.99
@@ -392,7 +393,7 @@ def main() -> None:
 
     # Bootstrap: if no latest model exists yet, create and save a fresh one.
     if not LATEST_MODEL_PATH.exists():
-        _env = SingleAgentWrapper(env_id=adapter.config.env_id, learning_seat=0, seed=SEED)
+        _env = make_single_agent_env(game=adapter.config.game, env_id=adapter.config.env_id, learning_seat=0, seed=SEED)
         try:
             MaskablePPO("MlpPolicy", _env, gamma=GAMMA, seed=SEED).save(str(LATEST_MODEL_PATH))
         finally:
@@ -402,7 +403,8 @@ def main() -> None:
     ratings = load_ratings(ELO_RATINGS_PATH)
     ratings.setdefault(str(LATEST_MODEL_PATH), DEFAULT_ELO)
     print(f"Initial opponent pool: {opponent_pool}")
-    env = SingleAgentWrapper(
+    env = make_single_agent_env(
+        game=adapter.config.game,
         env_id=adapter.config.env_id,
         learning_seat=0,
         seed=SEED,
@@ -420,7 +422,8 @@ def main() -> None:
         for iteration in range(1, SELF_PLAY_ITERATIONS + 1):
             if iteration > 1:
                 env.close()
-                env = SingleAgentWrapper(
+                env = make_single_agent_env(
+                    game=adapter.config.game,
                     env_id=adapter.config.env_id,
                     learning_seat=0,
                     seed=SEED,

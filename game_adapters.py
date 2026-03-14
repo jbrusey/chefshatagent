@@ -121,6 +121,10 @@ class IrpsAdapter(GameAdapter):
     def __init__(self, env_id: str = "irps-v1"):
         super().__init__(GameAdapterConfig(game="irps", env_id=env_id))
 
+    def make_env(self) -> gym.Env:
+        __import__("irps_env")
+        return super().make_env()
+
     def num_seats(self, env: gym.Env) -> int:
         for attr in ("n_players", "num_players", "nPlayers"):
             value = getattr(env, attr, None)
