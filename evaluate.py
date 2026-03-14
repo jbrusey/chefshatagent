@@ -7,7 +7,7 @@ import numpy as np
 from sb3_contrib import MaskablePPO
 
 from game_adapters import get_game_adapter
-from single_agent_wrapper import SingleAgentWrapper
+from irps_env import make_single_agent_env
 from utils import resolve_model_path
 
 SEED = 42
@@ -28,7 +28,12 @@ def main() -> None:
     args = _build_arg_parser().parse_args()
     adapter = get_game_adapter(args.game, env_id=args.env_id)
 
-    env = SingleAgentWrapper(env_id=adapter.config.env_id, learning_seat=LEARNING_SEAT, seed=SEED)
+    env = make_single_agent_env(
+        game=adapter.config.game,
+        env_id=adapter.config.env_id,
+        learning_seat=LEARNING_SEAT,
+        seed=SEED,
+    )
     resolved = resolve_model_path(MODEL_PATH)
     model = MaskablePPO.load(str(resolved), env=env)
     print(f"Loaded model: {resolved}")
