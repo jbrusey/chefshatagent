@@ -249,6 +249,8 @@ def test_resolve_seat_action_raises_on_short_observation():
         _resolve_seat_action(
             seat_agent=RANDOM_OPPONENT_TOKEN,
             obs=np.zeros(50, dtype=np.float32),
+            info={},
+            env=MagicMock(action_space=MagicMock(n=200)),
             action_space_n=200,
             adapter=ChefshatAdapter(),
             policy_cache={},

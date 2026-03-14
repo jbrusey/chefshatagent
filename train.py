@@ -84,12 +84,15 @@ def _current_player(base_env: gym.Env, info: dict[str, Any]) -> int:
 def _resolve_seat_action(
     seat_agent: str,
     obs: np.ndarray,
+    info: dict[str, Any],
+    env: gym.Env,
     action_space_n: int,
     adapter: GameAdapter,
     policy_cache: dict[str, MaskablePPO],
     rng: np.random.Generator,
 ) -> int:
-    mask = adapter.extract_valid_action_mask(obs, action_space_n)
+    policy_obs = adapter.adapt_observation(obs, info)
+    mask = adapter.get_action_mask(obs, env)
     if mask is None:
         mask = np.ones(action_space_n, dtype=bool)
     valid_actions = np.flatnonzero(mask)
@@ -104,7 +107,7 @@ def _resolve_seat_action(
         policy = MaskablePPO.load(seat_agent)
         policy_cache[seat_agent] = policy
 
-    action, _ = policy.predict(obs, deterministic=True, action_masks=mask)
+    action, _ = policy.predict(policy_obs, deterministic=True, action_masks=mask)
     action = int(action)
     if action not in valid_actions:
         raise RuntimeError(f"Agent {seat_agent} produced illegal action {action}")
@@ -134,6 +137,8 @@ def play_match_and_get_scores(
         action = _resolve_seat_action(
             seat_agent=seat_agents[current_player],
             obs=obs,
+            info=info,
+            env=base_env,
             action_space_n=base_env.action_space.n,
             adapter=adapter,
             policy_cache=policy_cache,

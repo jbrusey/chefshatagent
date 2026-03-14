@@ -8,6 +8,7 @@ import numpy as np
 import ChefsHatGym.env  # noqa: F401  # Registers gym.make("chefshat-v1") environment.
 from sb3_contrib import MaskablePPO
 
+from game_adapters import GameAdapter, get_game_adapter
 from utils import resolve_model_path
 
 
@@ -29,6 +30,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         description="Run a local Chef's Hat game with a trained MaskablePPO model and env GUI/logging"
     )
     parser.add_argument("--model-path", type=Path, default=DEFAULT_MODEL_PATH)
+    parser.add_argument("--game", choices=["chefshat", "irps"], default="chefshat")
     parser.add_argument("--env-id", default="chefshat-v1")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--episodes", type=lambda v: _positive_int(v, "--episodes"), default=1)
@@ -49,13 +51,11 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _action_mask_from_obs(obs: np.ndarray, action_count: int) -> np.ndarray:
-    mask = np.asarray(obs)[28:28 + action_count]
-    if mask.size != action_count:
-        raise RuntimeError(
-            f"Observation mask slice has size {mask.size}, expected {action_count}."
-        )
-    return mask.astype(bool)
+def _action_mask_from_obs(obs: np.ndarray, env: gym.Env, adapter: GameAdapter) -> np.ndarray:
+    mask = adapter.get_action_mask(obs, env)
+    if mask is None:
+        return np.ones(env.action_space.n, dtype=bool)
+    return np.asarray(mask, dtype=bool)
 
 
 def _to_one_hot(action: int, action_count: int) -> np.ndarray:
@@ -87,6 +87,7 @@ def _play_episode(
     rng: np.random.Generator,
     *,
     learning_seat: int,
+    adapter: GameAdapter,
     deterministic: bool,
     seed: int,
 ) -> tuple[bool, dict]:
@@ -96,13 +97,14 @@ def _play_episode(
 
     while not (terminated or truncated):
         current_player = _current_player(info, env)
-        mask = _action_mask_from_obs(obs, env.action_space.n)
+        mask = _action_mask_from_obs(obs, env, adapter)
         valid_actions = np.flatnonzero(mask)
         if valid_actions.size == 0:
             raise RuntimeError("No valid actions available")
 
         if current_player == learning_seat:
-            action, _ = model.predict(obs, action_masks=mask, deterministic=deterministic)
+            policy_obs = adapter.adapt_observation(obs, info)
+            action, _ = model.predict(policy_obs, action_masks=mask, deterministic=deterministic)
             action = int(action)
             if action not in valid_actions:
                 raise RuntimeError(
@@ -111,7 +113,7 @@ def _play_episode(
         else:
             action = int(rng.choice(valid_actions))
 
-        obs, _, terminated, truncated, info = env.step(_to_one_hot(action, env.action_space.n))
+        obs, _, terminated, truncated, info = env.step(adapter.format_env_action(action, env.action_space.n))
 
     scores = info.get("Match_Score", [])
     won = bool(scores) and int(scores[learning_seat]) == 3
@@ -122,6 +124,7 @@ def main() -> None:
     args = _build_arg_parser().parse_args()
 
     resolved_model = resolve_model_path(args.model_path)
+    adapter = get_game_adapter(args.game, env_id=args.env_id)
     model = MaskablePPO.load(str(resolved_model))
     print(f"Loaded model: {resolved_model}")
 
@@ -143,6 +146,7 @@ def main() -> None:
                 model,
                 rng,
                 learning_seat=args.learning_seat,
+                adapter=adapter,
                 deterministic=args.deterministic,
                 seed=args.seed + episode,
             )

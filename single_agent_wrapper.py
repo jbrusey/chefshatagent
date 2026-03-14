@@ -13,6 +13,8 @@ from ChefsHatGym.rewards.only_winning import RewardOnlyWinning
 from ChefsHatGym.rewards.reward import Reward
 from sb3_contrib import MaskablePPO
 
+from game_adapters import GameAdapter, get_game_adapter
+
 GAMMA=0.99
 APPLY_SHAPING_ON_TERMINAL = True
 RANDOM_OPPONENT_TOKEN = "__RANDOM__"
@@ -96,7 +98,8 @@ class SingleAgentWrapper(gym.Env):
     metadata = {"render_modes": []}
 
     def __init__(self, env_id: str = "chefshat-v1", learning_seat: int = 0, seed: int = 42,
-                 reward_fn: Reward | None = None, opponent_pool: list[str] | None = None):
+                 reward_fn: Reward | None = None, opponent_pool: list[str] | None = None,
+                 adapter: GameAdapter | None = None):
         super().__init__()
         self.learning_seat = learning_seat
         self._seed = seed
@@ -107,6 +110,13 @@ class SingleAgentWrapper(gym.Env):
         self.opponent_pool = opponent_pool or []
         self.current_opponents: list[FrozenPolicyOpponent] = []
         self._opponent_by_seat: dict[int, FrozenPolicyOpponent] = {}
+
+        if adapter is not None:
+            self.adapter = adapter
+        elif "irps" in env_id.lower():
+            self.adapter = get_game_adapter("irps", env_id=env_id)
+        else:
+            self.adapter = get_game_adapter("chefshat", env_id=env_id)
 
         self.base_env = gym.make(env_id)
 
@@ -124,10 +134,13 @@ class SingleAgentWrapper(gym.Env):
         self._last_obs: Any | None = None
         self._last_info: dict[str, Any] = {}
 
-    def _phi(self, obs):
-        hand = obs[11:28]
-        cards_left = np.count_nonzero(hand)
-        return -(cards_left / 17.0)
+    def _phi(self, obs, info: dict[str, Any] | None = None) -> float:
+        features = self.adapter.get_state_features_for_shaping(obs, info)
+        if features is None:
+            return 0.0
+        cards_left = np.count_nonzero(np.asarray(features).ravel())
+        denom = max(np.asarray(features).size, 1)
+        return -(cards_left / float(denom))
 
     def reset(self, *, seed: int | None = None, options: dict | None = None):
         if seed is not None:
@@ -184,7 +197,7 @@ class SingleAgentWrapper(gym.Env):
 
         # Capture phi BEFORE the agent's action and before any opponent turns
         # overwrite self._last_obs — this is the timing bug fix.
-        phi_prev = self._phi(self._last_obs)
+        phi_prev = self._phi(self._last_obs, self._last_info)
 
         step = self._step_base(action)
         obs, info = step.obs, step.info
@@ -203,7 +216,7 @@ class SingleAgentWrapper(gym.Env):
         # terminal transitions benefit from potential-based shaping using the final obs.
         if APPLY_SHAPING_ON_TERMINAL or not (terminated or truncated):
             # potential-based reward shaping: F(s,s') = γ·φ(s') − φ(s)
-            phi_next = self._phi(obs)
+            phi_next = self._phi(obs, info)
             total_reward += GAMMA * phi_next - phi_prev + self._step_penalty()
 
         self._last_obs = obs
@@ -215,12 +228,10 @@ class SingleAgentWrapper(gym.Env):
         """Boolean valid-action mask compatible with sb3-contrib MaskablePPO."""
         if self._last_obs is None:
             raise RuntimeError("No observation available yet. Call reset() before action_masks().")
-        mask = np.asarray(self._last_obs)[28:]
-        if mask.size != self.action_space.n:
-            raise RuntimeError(
-                f"Observation mask slice has size {mask.size}, expected {self.action_space.n}"
-            )
-        return mask.astype(bool)
+        mask = self.adapter.get_action_mask(self._last_obs, self.base_env)
+        if mask is None:
+            return np.ones(self.action_space.n, dtype=bool)
+        return np.asarray(mask, dtype=bool)
 
     # Alias requested in the prompt text.
     def get_action_mask(self) -> np.ndarray:
